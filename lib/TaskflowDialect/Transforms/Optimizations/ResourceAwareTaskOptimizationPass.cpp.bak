@@ -27,8 +27,23 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "NeuraDialect/Architecture/Architecture.h"
+#include "NeuraDialect/Mapping/mapping_util.h"
+#include "NeuraDialect/NeuraOps.h"
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <regex>
+#include <string>
+#include <unistd.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstdio>
+#include <fstream>
+#include <iostream>
 
 
 using namespace mlir;
@@ -228,42 +243,54 @@ private:
     tmp_module.erase();
   }
 
-  /// Fallback metric extraction: counts operations in the cloned function
-  /// to produce conservative II and steps estimates. Does NOT depend on any
-  /// Neura-specific analysis APIs — works on pure Taskflow/Affine/Func IR.
+  /// Fallback metric extraction when full pipeline fails partway through.
+  /// Uses whatever Neura IR was successfully lowered to extract ResMII,
+  /// RecMII, and critical path depth.
   void extractMetricsFallback(TaskGraphNode *node, ModuleOp tmp_module) {
-    size_t total_ops = 0;
-    size_t memory_ops = 0;
-    size_t compute_ops = 0;
+    const neura::Architecture &architecture = neura::getArchitecture();
 
-    // Walk all operations in the cloned module to estimate complexity.
-    tmp_module.walk([&](Operation *op) {
-      if (isa<ModuleOp, func::FuncOp, func::ReturnOp>(op))
-        return;
-      total_ops++;
-      if (isa<affine::AffineLoadOp, affine::AffineStoreOp>(op))
-        memory_ops++;
-      else
-        compute_ops++;
+    int res_mii = 1;
+    int rec_mii = 1;
+    int cp_depth = 1;
+
+    auto extractFromRegion = [&](Region &region) {
+      if (region.empty()) return;
+
+      res_mii = std::max(res_mii,
+                         neura::calculateResMii(region, architecture));
+
+      auto cycles = neura::collectRecurrenceCycles(region);
+      for (const auto &cycle : cycles) {
+        rec_mii = std::max(rec_mii, cycle.length);
+      }
+
+      auto sorted_ops = neura::getTopologicallySortedOps(region);
+      if (!sorted_ops.empty()) {
+        auto [critical_ops, asap_map] =
+            neura::identifyCriticalPathOps(sorted_ops);
+        for (auto *op : critical_ops) {
+          cp_depth = std::max(cp_depth, asap_map[op] + 1);
+        }
+      }
+    };
+
+    // Try kernels first, then funcs.
+    tmp_module.walk([&](neura::KernelOp kernel) {
+      extractFromRegion(kernel.getBody());
+    });
+    tmp_module.walk([&](func::FuncOp fn) {
+      if (fn->hasAttrOfType<StringAttr>("accelerator")) {
+        extractFromRegion(fn.getBody());
+      }
     });
 
-    // II estimate: at least 1, scales with memory pressure.
-    // A simple heuristic: memory-bound kernels have higher II.
-    int64_t est_ii = std::max(int64_t(1), static_cast<int64_t>(memory_ops / 4));
+    node->ii = std::max(res_mii, rec_mii);
+    node->steps = std::max(cp_depth, 1);
 
-    // Steps estimate: critical path depth ~ total compute ops.
-    int64_t est_steps = std::max(int64_t(1), static_cast<int64_t>(compute_ops));
-
-    node->ii = est_ii;
-    node->steps = est_steps;
-
-    llvm::errs() << "[profileTask] (fallback) "
+    llvm::errs() << "[profileTask] (fallback) " 
                  << node->op.getTaskName()
                  << ": ii=" << node->ii
-                 << ", steps=" << node->steps
-                 << " (ops=" << total_ops
-                 << ", mem=" << memory_ops
-                 << ", compute=" << compute_ops << ")\n";
+                 << ", steps=" << node->steps << "\n";
   }
 
   /// Computes total trip count by multiplying all affine.for loop bounds
