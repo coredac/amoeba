@@ -241,7 +241,7 @@ public:
       // If the task already has profiling attributes (e.g., from fusion),
       // skip expensive speculative lowering and use those directly.
       bool has_precomputed =
-          task->hasAttr("compiled_ii") && task->hasAttr("steps");
+          task->hasAttr("compiled_ii") && task->hasAttr("task_duration");
       if (!has_precomputed) {
         // Speculative lowering to Neura to get real metrics.
         profileTask(node.get(), task, skip_mapper);
@@ -255,7 +255,7 @@ public:
       }
 
       // Overrides with explicit attributes if present.
-      if (auto attr = task->getAttrOfType<IntegerAttr>("steps")) {
+      if (auto attr = task->getAttrOfType<IntegerAttr>("task_duration")) {
         node->steps = attr.getInt();
       }
       if (auto attr = task->getAttrOfType<IntegerAttr>("compiled_ii")) {
@@ -867,11 +867,11 @@ public:
       // Check if incrementing cgra_count is feasible on the 4×4 grid.
       // TODO: This currently only checks the capacity (total CGRA count).
       // Ideally, we should invoke a global placement pass (aka
-      // MapTaskOnCgraPass) here to verify if the speculatively increased CGRA
+      // OrchestrateTaskOnCgraPass) here to verify if the speculatively increased CGRA
       // count and its proposed shape actually fit on the 4x4 grid alongside
       // other previously allocated tasks.
       //
-      // Currently, MapTaskOnCgraPass does not support multi-CGRA task
+      // Currently, OrchestrateTaskOnCgraPass does not support multi-CGRA task
       // placement. Once it does, we should call it here; if global placement
       // fails for the "best" shape, we should backtrack and try alternative
       // shapes before saturating the node.
@@ -1551,7 +1551,7 @@ private:
       fused_node.trip_count = fused_trip;
       profile_fn(&fused_node, fused_task);
       fused_task->setAttr(
-          "steps", OpBuilder(fused_task).getI64IntegerAttr(fused_node.steps));
+          "task_duration", OpBuilder(fused_task).getI64IntegerAttr(fused_node.steps));
       fused_task->setAttr(
           "compiled_ii",
           OpBuilder(fused_task).getI64IntegerAttr(fused_node.ii));
@@ -1772,7 +1772,7 @@ struct ResourceAwareTaskOptimizationPass
             node->op->setAttr("compiled_ii", b.getI32IntegerAttr(node->ii));
           }
           if (node->steps != kUnprofiled) {
-            node->op->setAttr("steps", b.getI32IntegerAttr(node->steps));
+            node->op->setAttr("task_duration", b.getI32IntegerAttr(node->steps));
           }
           if (node->trip_count > 0) {
             node->op->setAttr("trip_count",
@@ -1814,7 +1814,7 @@ struct ResourceAwareTaskOptimizationPass
           node->op->setAttr("cgra_count",
                             b.getI32IntegerAttr(node->cgra_count));
           node->op->setAttr("compiled_ii", b.getI32IntegerAttr(node->ii));
-          node->op->setAttr("steps", b.getI32IntegerAttr(node->steps));
+          node->op->setAttr("task_duration", b.getI32IntegerAttr(node->steps));
           node->op->setAttr("trip_count",
                             b.getI32IntegerAttr(node->trip_count));
           // Writes cgra_shape attribute: simple "NxM" bounding-box string.

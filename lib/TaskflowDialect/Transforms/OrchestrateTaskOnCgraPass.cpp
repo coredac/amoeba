@@ -1,12 +1,13 @@
-//===- MapTaskOnCgraPass.cpp - Task to CGRA Mapping Pass ----------------===//
+//===- OrchestrateTaskOnCgraPass.cpp - Task to CGRA Orchestration Pass --===//
 //
 // This pass maps Taskflow tasks onto a 2D CGRA grid array using a
 // spatial-temporal approach:
-// 1. Assigns each task a (row, col, start_time, duration) allocation tuple.
-// 2. Tasks with no data dependencies may share the same time window on
-//    different CGRAs (spatial parallelism).
+// 1. Assigns each task a (row, col, time_slot, duration) allocation tuple.
+// 2. Tasks with no data dependencies may share the same time slot on
+//    different CGRAs (spatial parallelism); independent tasks are also
+//    assigned later time slots when all CGRAs are occupied.
 // 3. Tasks that exceed the number of CGRAs are time-multiplexed onto the
-//    same CGRAs at non-overlapping intervals (temporal reuse).
+//    same CGRAs at non-overlapping slots (temporal reuse).
 // 4. Assigns memrefs to SRAMs determined by proximity to accessing tasks.
 //
 //===----------------------------------------------------------------------===//
@@ -14,6 +15,10 @@
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "TaskflowDialect/TaskflowPasses.h"
+#include "NeuraDialect/Architecture/Architecture.h"
+#include "NeuraDialect/Mapping/mapping_util.h"
+#include "NeuraDialect/NeuraOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Builders.h"
@@ -44,13 +49,18 @@ namespace {
 /// [start_time, start_time + duration).  Two tasks may share the same CGRA as
 /// long as their intervals do not overlap, enabling time-multiplexed reuse.
 ///
-/// duration is read from the 'steps' IR attribute when present (written by
-/// ResourceAwareTaskOptimizationPass).  It defaults to 1 when the task has not
-/// yet been profiled, which is a conservative approximation (one ordinal slot).
+/// A "time slot" is a logical scheduling unit, not a fixed number of hardware
+/// cycles.  When the 'steps' attribute is present (written by
+/// ResourceAwareTaskOptimizationPass), its value is the critical-path depth
+/// (cp_depth) of the task's pipeline; the full execution latency is
+/// II × (trip_count - 1) + steps cycles (see estimatedLatency() in
+/// ResourceAwareTaskOptimizationPass).  Without profiling the unit is
+/// abstract — it is used only to enforce a non-overlap ordering between tasks
+/// on the same CGRA, not to model wall-clock time.
 struct CGRAPosition {
   int row;
   int col;
-  int start_time; // First time slot this CGRA is occupied by the task.
+  int start_time; // Index of the first time slot this CGRA is occupied by the task.
   int duration;   // Number of consecutive time slots occupied (>= 1).
 
   bool operator==(const CGRAPosition &other) const {
@@ -101,6 +111,92 @@ struct TaskPlacement {
 };
 
 //===----------------------------------------------------------------------===//
+// Analytical Duration Estimation
+//===----------------------------------------------------------------------===//
+/// Computes the trip count of a task from its taskflow.counter chain.
+///
+/// Multiple independent counter chains execute concurrently, so the total trip
+/// count is the max product across chains (matching ResourceAwareTaskOptimization
+/// semantics).  Returns 1 if no counters are found or bounds are non-constant.
+static int computeTripCountFromCounters(TaskflowTaskOp task) {
+  auto getConstIndex = [](Value val) -> std::optional<int64_t> {
+    if (auto cst = val.getDefiningOp<arith::ConstantIndexOp>())
+      return cst.value();
+    if (auto cst = val.getDefiningOp<arith::ConstantOp>())
+      if (auto idx = dyn_cast<IntegerAttr>(cst.getValue()))
+        return idx.getInt();
+    return std::nullopt;
+  };
+
+  int64_t max_product = 1;
+  task.walk([&](TaskflowCounterOp counter) {
+    // Only accumulates root counters; child counters are handled via the chain
+    // attribute.  Absence of the counter_type attr means standalone counter.
+    auto type_attr = counter->getAttrOfType<StringAttr>("counter_type");
+    if (type_attr && type_attr.getValue() != "root" &&
+        type_attr.getValue() != "leaf")
+      return;
+
+    auto lb = getConstIndex(counter.getLowerBound());
+    auto ub = getConstIndex(counter.getUpperBound());
+    auto st = getConstIndex(counter.getStep());
+    if (!lb || !ub || !st || *st <= 0)
+      return;
+
+    int64_t range = *ub - *lb;
+    int64_t tc = (range + *st - 1) / *st;
+    if (tc > 0)
+      max_product = std::max(max_product, tc);
+  });
+  return static_cast<int>(max_product);
+}
+
+/// Estimates a task's execution duration without full profiling.
+///
+/// Two-level estimation, in order of accuracy:
+///
+///   Kernel present (task has been lowered to neura.kernel):
+///     estimated_ii = max(ResMII, RecMII)
+///     duration     = estimated_ii * trip_count
+///     where ResMII = ceil(#ops / #tiles), RecMII = longest recurrence cycle,
+///     and trip_count is read from the 'trip_count' IR attribute (written by
+///     ResourceAwareTaskOptimizationPass) or defaults to 1.
+///
+///   No kernel yet (pass runs before --convert-taskflow-to-neura):
+///     duration = trip_count computed from taskflow.counter bounds.
+///     ResMII is unavailable, so only iteration count differentiates tasks.
+static int computeAnalyticalDuration(TaskflowTaskOp task) {
+  neura::KernelOp kernel;
+  task.walk([&](neura::KernelOp k) {
+    kernel = k;
+    WalkResult::interrupt();
+  });
+
+  if (!kernel) {
+    // No neura.kernel yet — estimate from counter trip count only.
+    return std::max(1, computeTripCountFromCounters(task));
+  }
+
+  const neura::Architecture &arch = neura::getArchitecture();
+
+  int res_mii = neura::calculateResMii(kernel.getBody(), arch);
+  res_mii = std::max(res_mii, 1);
+
+  int rec_mii = 1;
+  for (const neura::RecurrenceCycle &c :
+       neura::collectRecurrenceCycles(kernel.getBody()))
+    rec_mii = std::max(rec_mii, c.length);
+
+  int estimated_ii = std::max(res_mii, rec_mii);
+
+  int trip_count = 1;
+  if (auto attr = task->getAttrOfType<IntegerAttr>("trip_count"))
+    trip_count = std::max(1, static_cast<int>(attr.getInt()));
+
+  return estimated_ii * trip_count;
+}
+
+//===----------------------------------------------------------------------===//
 // Task-Memory Graph
 //===----------------------------------------------------------------------===//
 
@@ -123,14 +219,22 @@ struct TaskNode {
 
   TaskNode(size_t id, TaskflowTaskOp op) : id(id), op(op) {}
 
-  /// Returns the task's execution duration in time slots.
-  /// Reads the 'steps' attribute when present (set by
-  /// ResourceAwareTaskOptimizationPass); defaults to 1 when not yet annotated.
+  /// Returns the task's execution duration in logical time slots.
+  ///
+  /// Priority order:
+  ///   1. 'task_duration' IR attribute (written by
+  ///      ResourceAwareTaskOptimizationPass after full pipeline profiling) —
+  ///      most accurate; represents cp_depth from the Neura mapper.
+  ///   2. Analytical estimate: max(ResMII, RecMII) * trip_count, derived
+  ///      from the task's neura.kernel without running the full mapper.
+  ///      ResMII/RecMII give a lower bound on II; trip_count captures the
+  ///      loop iteration count.  Together they approximate relative task
+  ///      time slots even without profiling.  Falls back to trip_count from
+  ///      taskflow.counter bounds when no neura.kernel exists yet.
   int getDuration() const {
-    if (auto attr = op->getAttrOfType<IntegerAttr>("steps")) {
+    if (auto attr = op->getAttrOfType<IntegerAttr>("task_duration"))
       return std::max(1, static_cast<int>(attr.getInt()));
-    }
-    return 1;
+    return computeAnalyticalDuration(op);
   }
 };
 
@@ -235,11 +339,11 @@ enum class AllocationMode {
 class TaskMapper {
 public:
   TaskMapper(int grid_rows, int grid_cols, AllocationMode mode)
-      : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {
+      : num_cgra_rows_(grid_rows), num_cgra_cols_(grid_cols), mode_(mode) {
     // Initializes per-CGRA occupancy interval lists.
-    intervals_.resize(grid_rows_);
-    for (auto &row : intervals_) {
-      row.resize(grid_cols_);
+    this->cgra_occupancy_.resize(num_cgra_rows_);
+    for (auto &row : this->cgra_occupancy_) {
+      row.resize(num_cgra_cols_);
     }
   }
 
@@ -307,8 +411,8 @@ public:
 
         // Marks occupied intervals.
         for (const CGRAPosition &pos : placement.cgra_positions) {
-          if (pos.row >= 0 && pos.row < grid_rows_ && pos.col >= 0 &&
-              pos.col < grid_cols_) {
+          if (pos.row >= 0 && pos.row < this->num_cgra_rows_ && pos.col >= 0 &&
+              pos.col < this->num_cgra_cols_) {
             markOccupied(pos.row, pos.col, pos.start_time, pos.duration);
           }
         }
@@ -355,7 +459,7 @@ public:
           NamedAttribute(StringAttr::get(func.getContext(), "cgra_positions"),
                          builder.getArrayAttr(pos_attrs)));
 
-      // 2. Read SRAM locations.
+      // 2. Reads SRAM locations.
       SmallVector<Attribute> read_sram_attrs;
       for (MemoryNode *mem : task_node->read_memrefs) {
         if (mem->assigned_sram_pos) {
@@ -374,7 +478,7 @@ public:
           StringAttr::get(func.getContext(), "read_sram_locations"),
           builder.getArrayAttr(read_sram_attrs)));
 
-      // 3. Write SRAM locations.
+      // 3. Writes SRAM locations.
       SmallVector<Attribute> write_sram_attrs;
       for (MemoryNode *mem : task_node->write_memrefs) {
         if (mem->assigned_sram_pos) {
@@ -406,9 +510,9 @@ private:
   /// In Spatial mode any existing allocation blocks the CGRA entirely.
   bool isOccupied(int row, int col, int t, int d) const {
     if (mode_ == AllocationMode::Spatial) {
-      return !intervals_[row][col].empty();
+      return !cgra_occupancy_[row][col].empty();
     }
-    for (auto [s, e] : intervals_[row][col]) {
+    for (auto [s, e] : cgra_occupancy_[row][col]) {
       if (t < e && t + d > s) {
         return true;
       }
@@ -418,7 +522,7 @@ private:
 
   /// Records that CGRA (row, col) is occupied over [t, t+d).
   void markOccupied(int row, int col, int t, int d) {
-    intervals_[row][col].push_back({t, t + d});
+    cgra_occupancy_[row][col].push_back({t, t + d});
   }
 
   /// Clears all task placements and CGRA occupancy intervals.
@@ -426,7 +530,7 @@ private:
     for (auto &task : graph.task_nodes) {
       task->placement.clear();
     }
-    for (auto &row : intervals_) {
+    for (auto &row : cgra_occupancy_) {
       for (auto &col_intervals : row) {
         col_intervals.clear();
       }
@@ -473,25 +577,35 @@ private:
 
   /// Computes the earliest feasible start time for a task (ASAP scheduling).
   ///
-  /// A task may not start until all its producers have fully completed.
+  /// Enforces all three memory hazard orderings plus SSA dependences.
   int computeEarliestStartTime(const TaskNode *task_node) const {
     int min_time = 0;
-    // SSA producers must complete before this task starts.
-    for (const TaskNode *pred : task_node->ssa_operands) {
-      if (!pred->placement.empty()) {
-        const CGRAPosition &pos = pred->placement[0];
+
+    auto updateFromPlacement = [&](const TaskNode *other) {
+      if (other != task_node && !other->placement.empty()) {
+        const CGRAPosition &pos = other->placement[0];
         min_time = std::max(min_time, pos.start_time + pos.duration);
       }
+    };
+
+    // SSA producers must complete before this task starts.
+    for (const TaskNode *pred : task_node->ssa_operands)
+      updateFromPlacement(pred);
+
+    // RAW: writers of every memref this task reads must finish first.
+    for (const MemoryNode *mem : task_node->read_memrefs)
+      for (const TaskNode *writer : mem->writers)
+        updateFromPlacement(writer);
+
+    // WAW + WAR: for every memref this task writes, all other tasks that
+    // access it (whether as writer or reader) must finish first.
+    for (const MemoryNode *mem : task_node->write_memrefs) {
+      for (const TaskNode *other_writer : mem->writers)
+        updateFromPlacement(other_writer);
+      for (const TaskNode *reader : mem->readers)
+        updateFromPlacement(reader);
     }
-    // Memory producers must also finish.
-    for (const MemoryNode *mem : task_node->read_memrefs) {
-      for (const TaskNode *writer : mem->writers) {
-        if (writer != task_node && !writer->placement.empty()) {
-          const CGRAPosition &pos = writer->placement[0];
-          min_time = std::max(min_time, pos.start_time + pos.duration);
-        }
-      }
-    }
+
     return min_time;
   }
 
@@ -519,15 +633,15 @@ private:
     // time-multiplex onto a single CGRA.  Each occupies task_duration slots,
     // so at most N * task_duration steps are needed beyond min_time.
     int max_time = (mode_ == AllocationMode::SpatialTemporal)
-                       ? min_time + grid_rows_ * grid_cols_ * task_duration
+                       ? min_time + num_cgra_rows_ * num_cgra_cols_ * task_duration
                        : 0;
 
     for (int t = min_time; t <= max_time; t += task_duration) {
       int best_score = INT_MIN;
       TaskPlacement best_at_t;
 
-      for (int r = 0; r < grid_rows_; ++r) {
-        for (int c = 0; c < grid_cols_; ++c) {
+      for (int r = 0; r < num_cgra_rows_; ++r) {
+        for (int c = 0; c < num_cgra_cols_; ++c) {
           if (isOccupied(r, c, t, task_duration)) {
             continue;
           }
@@ -664,26 +778,26 @@ private:
     return depth_cache[node] = max_child_depth;
   }
 
-  int grid_rows_;
-  int grid_cols_;
+  int num_cgra_rows_;
+  int num_cgra_cols_;
   AllocationMode mode_;
-  // Per-CGRA occupancy intervals: intervals_[row][col] holds a list of
-  // (start, end_exclusive) pairs representing occupied time windows.
-  // In Spatial mode, non-empty means the CGRA is fully occupied.
-  std::vector<std::vector<SmallVector<std::pair<int, int>, 4>>> intervals_;
+  // Per-CGRA occupancy: cgra_occupancy_[row][col] holds a list of
+  // [start, end_exclusive) pairs representing occupied time windows.
+  // In Spatial mode, a non-empty list means the CGRA is fully occupied.
+  std::vector<std::vector<SmallVector<std::pair<int, int>, 4>>> cgra_occupancy_;
 };
 
 //===----------------------------------------------------------------------===//
 // Pass Definition
 //===----------------------------------------------------------------------===//
-struct MapTaskOnCgraPass
-    : public PassWrapper<MapTaskOnCgraPass, OperationPass<func::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MapTaskOnCgraPass)
+struct OrchestrateTaskOnCgraPass
+    : public PassWrapper<OrchestrateTaskOnCgraPass, OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OrchestrateTaskOnCgraPass)
 
-  MapTaskOnCgraPass() = default;
-  MapTaskOnCgraPass(const MapTaskOnCgraPass &other) : PassWrapper(other) {}
+  OrchestrateTaskOnCgraPass() = default;
+  OrchestrateTaskOnCgraPass(const OrchestrateTaskOnCgraPass &other) : PassWrapper(other) {}
 
-  StringRef getArgument() const override { return "map-task-on-cgra"; }
+  StringRef getArgument() const override { return "orchestrate-task-on-cgra"; }
 
   StringRef getDescription() const override {
     return "Maps Taskflow tasks onto a 2D CGRA grid with adjacency "
@@ -709,7 +823,7 @@ struct MapTaskOnCgraPass
     if (allocationMode.getValue() == "spatial") {
       mode = AllocationMode::Spatial;
     } else if (allocationMode.getValue() != "spatial-temporal") {
-      func.emitError("map-task-on-cgra: unknown allocation-mode '")
+      func.emitError("orchestrate-task-on-cgra: unknown allocation-mode '")
           << allocationMode.getValue()
           << "'. Valid values: 'spatial', 'spatial-temporal'.";
       return signalPassFailure();
@@ -727,8 +841,8 @@ struct MapTaskOnCgraPass
 namespace mlir {
 namespace taskflow {
 
-std::unique_ptr<Pass> createMapTaskOnCgraPass() {
-  return std::make_unique<MapTaskOnCgraPass>();
+std::unique_ptr<Pass> createOrchestrateTaskOnCgraPass() {
+  return std::make_unique<OrchestrateTaskOnCgraPass>();
 }
 
 } // namespace taskflow
