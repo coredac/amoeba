@@ -36,14 +36,14 @@
 // RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: '--orchestrate-task-on-cgra=allocation-mode=spatial-temporal' \
+// RUN: '--orchestrate-task-on-cgra=orchestration-mode=spatial-temporal' \
 // RUN: -o %t.map_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL
 
 // RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: '--orchestrate-task-on-cgra=allocation-mode=spatial' \
+// RUN: '--orchestrate-task-on-cgra=orchestration-mode=spatial' \
 // RUN: -o %t.map_spatial.mlir
 // RUN: FileCheck %s --input-file=%t.map_spatial.mlir --check-prefixes=MAP-SPATIAL
 
@@ -407,7 +407,7 @@ module attributes {} {
 // PLACEMENT-NEXT:     %c0_i32 = arith.constant 0 : i32
 // PLACEMENT-NEXT:     %alloca = memref.alloca() : memref<i32>
 // PLACEMENT-NEXT:     %alloca_0 = memref.alloca() : memref<4x8xi32>
-// PLACEMENT-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {task_mapping_info = {cgra_positions = [{col = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
+// PLACEMENT-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
 // PLACEMENT-NEXT:     ^bb0(%arg0: i32):
 // PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
 // PLACEMENT-NEXT:       %c5 = arith.constant 5 : index
@@ -421,7 +421,7 @@ module attributes {} {
 // PLACEMENT-NEXT:       }) : (index, i32) -> i32
 // PLACEMENT-NEXT:       taskflow.yield values(%2 : i32)
 // PLACEMENT-NEXT:     }
-// PLACEMENT-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {task_mapping_info = {cgra_positions = [{col = 2 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 2 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
+// PLACEMENT-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 2 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
 // PLACEMENT-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: i32):
 // PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
 // PLACEMENT-NEXT:       %c4 = arith.constant 4 : index
@@ -443,7 +443,7 @@ module attributes {} {
 // PLACEMENT-NEXT:       }) : (index) -> ()
 // PLACEMENT-NEXT:       taskflow.yield writes(%arg0 : memref<4x8xi32>)
 // PLACEMENT-NEXT:     }
-// PLACEMENT-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {task_mapping_info = {cgra_positions = [{col = 1 : i32, row = 0 : i32}], read_sram_locations = [{col = 2 : i32, row = 0 : i32}], write_sram_locations = [{col = 1 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
+// PLACEMENT-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 1 : i32, row = 0 : i32}], read_sram_locations = [{col = 0 : i32, row = 0 : i32}], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
 // PLACEMENT-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: memref<i32>, %arg2: i32, %arg3: i32, %arg4: i32):
 // PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
 // PLACEMENT-NEXT:       %c4 = arith.constant 4 : index
@@ -489,7 +489,7 @@ module attributes {} {
 // MAP-SPATIAL-TEMPORAL-NEXT:     %c0_i32 = arith.constant 0 : i32
 // MAP-SPATIAL-TEMPORAL-NEXT:     %alloca = memref.alloca() : memref<i32>
 // MAP-SPATIAL-TEMPORAL-NEXT:     %alloca_0 = memref.alloca() : memref<4x8xi32>
-// MAP-SPATIAL-TEMPORAL-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {task_mapping_info = {cgra_positions = [{col = 0 : i32, duration = 5 : i32, row = 0 : i32, start_time = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
+// MAP-SPATIAL-TEMPORAL-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
 // MAP-SPATIAL-TEMPORAL-NEXT:     ^bb0(%arg0: i32):
 // MAP-SPATIAL-TEMPORAL-NEXT:       %c0 = arith.constant 0 : index
 // MAP-SPATIAL-TEMPORAL-NEXT:       %c5 = arith.constant 5 : index
@@ -503,7 +503,7 @@ module attributes {} {
 // MAP-SPATIAL-TEMPORAL-NEXT:       }) : (index, i32) -> i32
 // MAP-SPATIAL-TEMPORAL-NEXT:       taskflow.yield values(%2 : i32)
 // MAP-SPATIAL-TEMPORAL-NEXT:     }
-// MAP-SPATIAL-TEMPORAL-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {task_mapping_info = {cgra_positions = [{col = 1 : i32, duration = 4 : i32, row = 0 : i32, start_time = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 1 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
+// MAP-SPATIAL-TEMPORAL-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 2 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
 // MAP-SPATIAL-TEMPORAL-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: i32):
 // MAP-SPATIAL-TEMPORAL-NEXT:       %c0 = arith.constant 0 : index
 // MAP-SPATIAL-TEMPORAL-NEXT:       %c4 = arith.constant 4 : index
@@ -525,7 +525,7 @@ module attributes {} {
 // MAP-SPATIAL-TEMPORAL-NEXT:       }) : (index) -> ()
 // MAP-SPATIAL-TEMPORAL-NEXT:       taskflow.yield writes(%arg0 : memref<4x8xi32>)
 // MAP-SPATIAL-TEMPORAL-NEXT:     }
-// MAP-SPATIAL-TEMPORAL-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {task_mapping_info = {cgra_positions = [{col = 0 : i32, duration = 4 : i32, row = 0 : i32, start_time = 5 : i32}], read_sram_locations = [{col = 1 : i32, row = 0 : i32}], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
+// MAP-SPATIAL-TEMPORAL-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 1 : i32, row = 0 : i32}], read_sram_locations = [{col = 0 : i32, row = 0 : i32}], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
 // MAP-SPATIAL-TEMPORAL-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: memref<i32>, %arg2: i32, %arg3: i32, %arg4: i32):
 // MAP-SPATIAL-TEMPORAL-NEXT:       %c0 = arith.constant 0 : index
 // MAP-SPATIAL-TEMPORAL-NEXT:       %c4 = arith.constant 4 : index
@@ -563,7 +563,6 @@ module attributes {} {
 // MAP-SPATIAL-TEMPORAL-NEXT:     return %0 : i32
 // MAP-SPATIAL-TEMPORAL-NEXT:   }
 // MAP-SPATIAL-TEMPORAL-NEXT: }
- 
 
 // MAP-SPATIAL: module {
 // MAP-SPATIAL-NEXT:   func.func @_Z21irregularLoopExample1v() -> i32 attributes {llvm.linkage = #llvm.linkage<external>} {
@@ -572,7 +571,7 @@ module attributes {} {
 // MAP-SPATIAL-NEXT:     %c0_i32 = arith.constant 0 : i32
 // MAP-SPATIAL-NEXT:     %alloca = memref.alloca() : memref<i32>
 // MAP-SPATIAL-NEXT:     %alloca_0 = memref.alloca() : memref<4x8xi32>
-// MAP-SPATIAL-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {task_mapping_info = {cgra_positions = [{col = 0 : i32, duration = 5 : i32, row = 0 : i32, start_time = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
+// MAP-SPATIAL-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
 // MAP-SPATIAL-NEXT:     ^bb0(%arg0: i32):
 // MAP-SPATIAL-NEXT:       %c0 = arith.constant 0 : index
 // MAP-SPATIAL-NEXT:       %c5 = arith.constant 5 : index
@@ -586,7 +585,7 @@ module attributes {} {
 // MAP-SPATIAL-NEXT:       }) : (index, i32) -> i32
 // MAP-SPATIAL-NEXT:       taskflow.yield values(%2 : i32)
 // MAP-SPATIAL-NEXT:     }
-// MAP-SPATIAL-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {task_mapping_info = {cgra_positions = [{col = 1 : i32, duration = 4 : i32, row = 1 : i32, start_time = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 1 : i32, row = 1 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
+// MAP-SPATIAL-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 2 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 2 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
 // MAP-SPATIAL-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: i32):
 // MAP-SPATIAL-NEXT:       %c0 = arith.constant 0 : index
 // MAP-SPATIAL-NEXT:       %c4 = arith.constant 4 : index
@@ -608,7 +607,7 @@ module attributes {} {
 // MAP-SPATIAL-NEXT:       }) : (index) -> ()
 // MAP-SPATIAL-NEXT:       taskflow.yield writes(%arg0 : memref<4x8xi32>)
 // MAP-SPATIAL-NEXT:     }
-// MAP-SPATIAL-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {task_mapping_info = {cgra_positions = [{col = 0 : i32, duration = 4 : i32, row = 1 : i32, start_time = 0 : i32}], read_sram_locations = [{col = 1 : i32, row = 1 : i32}], write_sram_locations = [{col = 0 : i32, row = 1 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
+// MAP-SPATIAL-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 1 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [{col = 2 : i32, row = 0 : i32}], write_sram_locations = [{col = 1 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
 // MAP-SPATIAL-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: memref<i32>, %arg2: i32, %arg3: i32, %arg4: i32):
 // MAP-SPATIAL-NEXT:       %c0 = arith.constant 0 : index
 // MAP-SPATIAL-NEXT:       %c4 = arith.constant 4 : index
@@ -656,7 +655,7 @@ module attributes {} {
 // RESOPT-NEXT:     %c0_i32 = arith.constant 0 : i32
 // RESOPT-NEXT:     %alloca = memref.alloca() : memref<i32>
 // RESOPT-NEXT:     %alloca_0 = memref.alloca() : memref<4x8xi32>
-// RESOPT-NEXT:     %dependency_write_out, %value_outputs = taskflow.task @Task_0_Task_1_utilfused dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c0_i32, %c8_i32 : i32, i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {cgra_count = 2 : i32, cgra_shape = "1x2", compiled_ii = 3 : i32, task_duration = 5 : i32, trip_count = 32 : i32} : (memref<4x8xi32>, i32, i32) -> (memref<4x8xi32>, i32) {
+// RESOPT-NEXT:     %dependency_write_out, %value_outputs = taskflow.task @Task_0_Task_1_utilfused dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c0_i32, %c8_i32 : i32, i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {cgra_count = 2 : i32, cgra_shape = "1x2", compiled_ii = 3 : i32, profile_info = {duration = 5 : i32}, trip_count = 32 : i32} : (memref<4x8xi32>, i32, i32) -> (memref<4x8xi32>, i32) {
 // RESOPT-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: i32, %arg2: i32):
 // RESOPT-NEXT:       %c0 = arith.constant 0 : index
 // RESOPT-NEXT:       %c5 = arith.constant 5 : index
@@ -692,7 +691,7 @@ module attributes {} {
 // RESOPT-NEXT:       %4 = taskflow.counter parent(%3 : index) from %c0_2 to %c8 step %c1_3 attributes {counter_id = 1 : i32, counter_type = "leaf"} : index
 // RESOPT-NEXT:       taskflow.yield writes(%arg0 : memref<4x8xi32>) values(%2 : i32)
 // RESOPT-NEXT:     }
-// RESOPT-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {cgra_count = 2 : i32, cgra_shape = "1x2", compiled_ii = 2 : i32, task_duration = 7 : i32, trip_count = 32 : i32} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
+// RESOPT-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {cgra_count = 2 : i32, cgra_shape = "1x2", compiled_ii = 2 : i32, profile_info = {duration = 7 : i32}, trip_count = 32 : i32} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
 // RESOPT-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: memref<i32>, %arg2: i32, %arg3: i32, %arg4: i32):
 // RESOPT-NEXT:       %c8 = arith.constant 8 : index
 // RESOPT-NEXT:       %c0 = arith.constant 0 : index
