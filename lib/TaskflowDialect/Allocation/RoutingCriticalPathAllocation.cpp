@@ -4,11 +4,26 @@
 // lives in the TaskMapper class (internal to this file); runAllocation()
 // instantiates it and delegates to TaskMapper::place().
 //
+// Supports two allocation modes (controlled by AllocationMode):
+//   Spatial          — places each task on a unique CGRA; asserts if tasks
+//                      exceed the grid size.
+//   SpatialTemporal  — adds a time_slot dimension (ASAP scheduling with
+//                      memory-dependency ordering) so that CGRAs can be
+//                      reused across time slots.
+//
+// In both modes the output attribute on each taskflow.task op is
+// `task_mapping_info`, which includes cgra_positions (with col, duration, row,
+// start_time fields), read_sram_locations, and write_sram_locations.
+//
 //===----------------------------------------------------------------------===//
 
 #include "TaskflowDialect/Allocation/RoutingCriticalPathAllocation.h"
 #include "TaskflowDialect/Allocation/allocation_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
+#include "NeuraDialect/Architecture/Architecture.h"
+#include "NeuraDialect/Mapping/mapping_util.h"
+#include "NeuraDialect/NeuraOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/DenseMap.h"
@@ -33,12 +48,26 @@ using namespace mlir::taskflow;
 namespace {
 
 //===----------------------------------------------------------------------===//
-// CGRA Grid Position
+// CGRA Grid Position (spatial + temporal)
 //===----------------------------------------------------------------------===//
-/// Represents a position on the 2D CGRA grid.
+/// Represents a spatial-temporal allocation for a task on the 2D CGRA grid.
+///
+/// A task assigned to (row, col) occupies that CGRA for the half-open interval
+/// [start_time, start_time + duration).  Two tasks may share the same CGRA as
+/// long as their intervals do not overlap, enabling time-multiplexed reuse.
+///
+/// A "time slot" is a logical scheduling unit, not a fixed number of hardware
+/// cycles.  When the 'task_duration' attribute is present (written by
+/// ResourceAwareTaskOptimizationPass), its value is the critical-path depth
+/// (cp_depth) of the task's pipeline; the full execution latency is
+/// II × (trip_count - 1) + task_duration cycles.  Without profiling the unit
+/// is abstract — used only to enforce non-overlap ordering between tasks on
+/// the same CGRA.
 struct CgraPosition {
   int row;
   int col;
+  int start_time = 0; // Index of the first time slot this CGRA is occupied.
+  int duration = 1;   // Number of consecutive time slots occupied (>= 1).
 
   bool operator==(const CgraPosition &other) const {
     return row == other.row && col == other.col;
@@ -67,7 +96,8 @@ struct TaskPlacement {
 
   /// Returns the primary (first) CGRA position.
   CgraPosition primary() const {
-    return cgra_positions.empty() ? CgraPosition{-1, -1} : cgra_positions[0];
+    return cgra_positions.empty() ? CgraPosition{-1, -1, 0, 0}
+                                  : cgra_positions[0];
   }
 
   /// Returns the number of CGRAs assigned to this task.
@@ -87,6 +117,85 @@ struct TaskPlacement {
     return false;
   }
 };
+
+//===----------------------------------------------------------------------===//
+// Analytical Duration Estimation
+//===----------------------------------------------------------------------===//
+/// Computes the trip count of a task from its taskflow.counter chain.
+///
+/// Multiple independent counter chains execute concurrently, so the total trip
+/// count is the max product across chains.  Returns 1 if no counters are found
+/// or bounds are non-constant.
+static int computeTripCountFromCounters(TaskflowTaskOp task) {
+  auto getConstIndex = [](Value val) -> std::optional<int64_t> {
+    if (auto cst = val.getDefiningOp<arith::ConstantIndexOp>())
+      return cst.value();
+    if (auto cst = val.getDefiningOp<arith::ConstantOp>())
+      if (auto idx = dyn_cast<IntegerAttr>(cst.getValue()))
+        return idx.getInt();
+    return std::nullopt;
+  };
+
+  int64_t max_product = 1;
+  task.walk([&](TaskflowCounterOp counter) {
+    auto type_attr = counter->getAttrOfType<StringAttr>("counter_type");
+    if (type_attr && type_attr.getValue() != "root" &&
+        type_attr.getValue() != "leaf")
+      return;
+
+    auto lb = getConstIndex(counter.getLowerBound());
+    auto ub = getConstIndex(counter.getUpperBound());
+    auto st = getConstIndex(counter.getStep());
+    if (!lb || !ub || !st || *st <= 0)
+      return;
+
+    int64_t range = *ub - *lb;
+    int64_t tc = (range + *st - 1) / *st;
+    if (tc > 0)
+      max_product = std::max(max_product, tc);
+  });
+  return static_cast<int>(max_product);
+}
+
+/// Estimates a task's execution duration without full profiling.
+///
+/// Two-level estimation, in order of accuracy:
+///
+///   Kernel present (task has been lowered to neura.kernel):
+///     estimated_ii = max(ResMII, RecMII)
+///     duration     = estimated_ii × trip_count
+///
+///   No kernel yet (pass runs before --convert-taskflow-to-neura):
+///     duration = trip_count computed from taskflow.counter bounds.
+static int computeAnalyticalDuration(TaskflowTaskOp task) {
+  neura::KernelOp kernel;
+  task.walk([&](neura::KernelOp k) {
+    kernel = k;
+    WalkResult::interrupt();
+  });
+
+  if (!kernel) {
+    return std::max(1, computeTripCountFromCounters(task));
+  }
+
+  const neura::Architecture &arch = neura::getArchitecture();
+
+  int res_mii = neura::calculateResMii(kernel.getBody(), arch);
+  res_mii = std::max(res_mii, 1);
+
+  int rec_mii = 1;
+  for (const neura::RecurrenceCycle &c :
+       neura::collectRecurrenceCycles(kernel.getBody()))
+    rec_mii = std::max(rec_mii, c.length);
+
+  int estimated_ii = std::max(res_mii, rec_mii);
+
+  int trip_count = 1;
+  if (auto attr = task->getAttrOfType<IntegerAttr>("trip_count"))
+    trip_count = std::max(1, static_cast<int>(attr.getInt()));
+
+  return estimated_ii * trip_count;
+}
 
 //===----------------------------------------------------------------------===//
 // Task-Memory Graph
@@ -112,6 +221,18 @@ struct TaskNode {
   SmallVector<CgraPosition> placement;
 
   TaskNode(size_t id, TaskflowTaskOp op) : id(id), op(op) {}
+
+  /// Returns the task's execution duration in time slots.
+  ///
+  /// Priority order:
+  ///   1. 'task_duration' attribute (written by ResourceAwareTaskOptimizationPass
+  ///      after profiling) — most accurate.
+  ///   2. Analytical estimation from neura.kernel MII or counter trip count.
+  int getDuration() const {
+    if (auto attr = op->getAttrOfType<IntegerAttr>("task_duration"))
+      return std::max(1, static_cast<int>(attr.getInt()));
+    return computeAnalyticalDuration(op);
+  }
 };
 
 /// Represents a MemRef node in the dependency graph.
@@ -200,13 +321,17 @@ private:
 ///            processing tasks in routing-critical-path-first order.
 ///   Phase 2: Assign each MemRef to the nearest SRAM given task positions.
 /// Iterates until SRAM assignments converge.
+///
+/// In SpatialTemporal mode, ASAP scheduling is applied via
+/// computeEarliestStartTime() before Phase 1 so that each task starts as soon
+/// as all its dependencies (SSA, RAW, WAW, WAR) have completed.
 class TaskMapper {
 public:
-  TaskMapper(int grid_rows, int grid_cols)
-      : grid_rows_(grid_rows), grid_cols_(grid_cols) {
-    occupied_.resize(grid_rows_);
-    for (auto &row : occupied_) {
-      row.resize(grid_cols_, false);
+  TaskMapper(int grid_rows, int grid_cols, AllocationMode mode)
+      : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {
+    this->cgra_occupancy_.resize(grid_rows_);
+    for (auto &row : this->cgra_occupancy_) {
+      row.resize(grid_cols_);
     }
   }
 
@@ -283,9 +408,8 @@ public:
         }
 
         for (const auto &pos : placement.cgra_positions) {
-          if (pos.row >= 0 && pos.row < grid_rows_ && pos.col >= 0 &&
-              pos.col < grid_cols_) {
-            occupied_[pos.row][pos.col] = true;
+          if (pos.row >= 0 && this->pos_in_bounds(pos)) {
+            markOccupied(pos.row, pos.col, pos.start_time, pos.duration);
           }
         }
       }
@@ -299,7 +423,7 @@ public:
       }
     }
 
-    // Annotates result: writes task_allocation_info attribute to each task op.
+    // Annotates result: writes task_mapping_info attribute to each task op.
     OpBuilder builder(func.getContext());
     for (auto &task_node : graph.task_nodes) {
       if (task_node->placement.empty()) {
@@ -308,16 +432,23 @@ public:
 
       SmallVector<NamedAttribute, 4> mapping_attrs;
 
-      // 1. CGRA positions.
+      // 1. CGRA positions (alphabetical key order: col, duration, row,
+      // start_time).
       SmallVector<Attribute> pos_attrs;
       for (const auto &pos : task_node->placement) {
-        SmallVector<NamedAttribute, 2> coord_attrs;
+        SmallVector<NamedAttribute, 4> coord_attrs;
+        coord_attrs.push_back(
+            NamedAttribute(StringAttr::get(func.getContext(), "col"),
+                           builder.getI32IntegerAttr(pos.col)));
+        coord_attrs.push_back(
+            NamedAttribute(StringAttr::get(func.getContext(), "duration"),
+                           builder.getI32IntegerAttr(pos.duration)));
         coord_attrs.push_back(
             NamedAttribute(StringAttr::get(func.getContext(), "row"),
                            builder.getI32IntegerAttr(pos.row)));
         coord_attrs.push_back(
-            NamedAttribute(StringAttr::get(func.getContext(), "col"),
-                           builder.getI32IntegerAttr(pos.col)));
+            NamedAttribute(StringAttr::get(func.getContext(), "start_time"),
+                           builder.getI32IntegerAttr(pos.start_time)));
         pos_attrs.push_back(
             DictionaryAttr::get(func.getContext(), coord_attrs));
       }
@@ -325,17 +456,17 @@ public:
           NamedAttribute(StringAttr::get(func.getContext(), "cgra_positions"),
                          builder.getArrayAttr(pos_attrs)));
 
-      // 2. Read SRAM locations.
+      // 2. Reads SRAM locations.
       SmallVector<Attribute> read_sram_attrs;
       for (MemoryNode *mem : task_node->read_memrefs) {
         if (mem->assigned_sram_pos) {
           SmallVector<NamedAttribute, 2> sram_coord;
           sram_coord.push_back(NamedAttribute(
-              StringAttr::get(func.getContext(), "row"),
-              builder.getI32IntegerAttr(mem->assigned_sram_pos->row)));
-          sram_coord.push_back(NamedAttribute(
               StringAttr::get(func.getContext(), "col"),
               builder.getI32IntegerAttr(mem->assigned_sram_pos->col)));
+          sram_coord.push_back(NamedAttribute(
+              StringAttr::get(func.getContext(), "row"),
+              builder.getI32IntegerAttr(mem->assigned_sram_pos->row)));
           read_sram_attrs.push_back(
               DictionaryAttr::get(func.getContext(), sram_coord));
         }
@@ -344,17 +475,17 @@ public:
           StringAttr::get(func.getContext(), "read_sram_locations"),
           builder.getArrayAttr(read_sram_attrs)));
 
-      // 3. Write SRAM locations.
+      // 3. Writes SRAM locations.
       SmallVector<Attribute> write_sram_attrs;
       for (MemoryNode *mem : task_node->write_memrefs) {
         if (mem->assigned_sram_pos) {
           SmallVector<NamedAttribute, 2> sram_coord;
           sram_coord.push_back(NamedAttribute(
-              StringAttr::get(func.getContext(), "row"),
-              builder.getI32IntegerAttr(mem->assigned_sram_pos->row)));
-          sram_coord.push_back(NamedAttribute(
               StringAttr::get(func.getContext(), "col"),
               builder.getI32IntegerAttr(mem->assigned_sram_pos->col)));
+          sram_coord.push_back(NamedAttribute(
+              StringAttr::get(func.getContext(), "row"),
+              builder.getI32IntegerAttr(mem->assigned_sram_pos->row)));
 
           write_sram_attrs.push_back(
               DictionaryAttr::get(func.getContext(), sram_coord));
@@ -364,29 +495,88 @@ public:
           StringAttr::get(func.getContext(), "write_sram_locations"),
           builder.getArrayAttr(write_sram_attrs)));
 
-      // Sets task_allocation_info attribute on the task op.
+      // Sets task_mapping_info attribute on the task op.
       task_node->op->setAttr(
-          "task_allocation_info",
+          "task_mapping_info",
           DictionaryAttr::get(func.getContext(), mapping_attrs));
 
       // Removes upstream resource-binding attributes that have now been
       // consumed by allocation. Downstream passes should read the
-      // task_allocation_info attribute instead.
+      // task_mapping_info attribute instead.
       task_node->op->removeAttr("cgra_count");
       task_node->op->removeAttr("cgra_shape");
     }
   }
 
 private:
+  /// Returns true if `pos` is within the grid bounds.
+  bool pos_in_bounds(const CgraPosition &pos) const {
+    return pos.row >= 0 && pos.row < this->grid_rows_ && pos.col >= 0 &&
+           pos.col < this->grid_cols_;
+  }
+
+  /// Returns true if the CGRA at (row, col) is occupied during [t, t+d).
+  ///
+  /// In Spatial mode: occupied if any interval is present (cell is permanently
+  /// taken once a task is placed).
+  /// In SpatialTemporal mode: occupied if any existing interval overlaps [t,
+  /// t+d).
+  bool isOccupied(int row, int col, int t, int d) const {
+    if (mode_ == AllocationMode::Spatial)
+      return !cgra_occupancy_[row][col].empty();
+    for (auto [s, e] : cgra_occupancy_[row][col])
+      if (t < e && t + d > s)
+        return true;
+    return false;
+  }
+
+  /// Marks the CGRA at (row, col) as occupied during [t, t+d).
+  void markOccupied(int row, int col, int t, int d) {
+    cgra_occupancy_[row][col].push_back({t, t + d});
+  }
+
   /// Clears all task placements and resets the occupied-cell grid.
   void resetTaskPlacements(TaskMemoryGraph &graph) {
     for (auto &task : graph.task_nodes) {
       task->placement.clear();
     }
-    // Clears grid.
-    for (int r = 0; r < grid_rows_; ++r) {
-      std::fill(occupied_[r].begin(), occupied_[r].end(), false);
+    for (auto &row : this->cgra_occupancy_)
+      for (auto &col_intervals : row)
+        col_intervals.clear();
+  }
+
+  /// Computes the earliest start time for `task_node` such that all its
+  /// dependencies (SSA, RAW, WAW, WAR) have completed.
+  ///
+  /// Only meaningful in SpatialTemporal mode; returns 0 in Spatial mode.
+  int computeEarliestStartTime(const TaskNode *task_node) const {
+    int min_time = 0;
+
+    auto updateFromPlacement = [&](const TaskNode *other) {
+      if (other != task_node && !other->placement.empty()) {
+        const CgraPosition &pos = other->placement[0];
+        min_time = std::max(min_time, pos.start_time + pos.duration);
+      }
+    };
+
+    // SSA producers must complete before this task starts.
+    for (const TaskNode *pred : task_node->ssa_operands)
+      updateFromPlacement(pred);
+
+    // RAW: writers of every memref this task reads must finish first.
+    for (const MemoryNode *mem : task_node->read_memrefs)
+      for (const TaskNode *writer : mem->writers)
+        updateFromPlacement(writer);
+
+    // WAW + WAR: for every memref this task writes, all other tasks that
+    // access it (whether as writer or reader) must finish first.
+    for (const MemoryNode *mem : task_node->write_memrefs) {
+      for (const TaskNode *other_writer : mem->writers)
+        updateFromPlacement(other_writer);
+      for (const TaskNode *reader : mem->readers)
+        updateFromPlacement(reader);
     }
+    return min_time;
   }
 
   /// Assigns each MemoryNode to the SRAM at the centroid of all CGRAs that
@@ -418,7 +608,7 @@ private:
         // Rounds to the nearest integer (round-half-up).
         int avg_row = (total_row + count / 2) / count;
         int avg_col = (total_col + count / 2) / count;
-        new_sram_pos = CgraPosition{avg_row, avg_col};
+        new_sram_pos = CgraPosition{avg_row, avg_col, 0, 0};
       }
 
       if (mem_node->assigned_sram_pos != new_sram_pos) {
@@ -440,6 +630,10 @@ private:
   // was not processed by the resource-binding pass), falls back to enumerating
   // all rectangular factorizations of cgra_count, then a polyomino DFS.
   //
+  // In SpatialTemporal mode an outer time loop applies ASAP scheduling:
+  // the earliest feasible start time is computed from dependency constraints,
+  // then incremented by task_duration until a valid grid position is found.
+  //
   // Returns an empty TaskPlacement only if no valid position exists on the grid
   // (should not happen if cgra_count was validated upstream).
   TaskPlacement findBestPlacement(TaskNode *task_node, int cgra_count,
@@ -460,48 +654,74 @@ private:
       shapes_to_try = getAllPlacementShapes(cgra_count);
     }
 
-    int best_score = INT_MIN;
-    TaskPlacement best_placement;
+    int task_duration = task_node->getDuration();
 
-    for (const CgraShape &shape : shapes_to_try) {
-      SmallVector<std::pair<int, int>> shape_offsets;
-      if (shape.is_rectangular) {
-        for (int r = 0; r < shape.rows; ++r)
-          for (int c = 0; c < shape.cols; ++c)
-            shape_offsets.push_back({c, r});
-      } else {
-        shape_offsets = SmallVector<std::pair<int, int>>(
-            shape.cgra_positions.begin(), shape.cgra_positions.end());
-      }
+    // In SpatialTemporal mode: ASAP start time from dependency constraints.
+    // In Spatial mode: only try t = 0 (no time dimension).
+    int t_start = (mode_ == AllocationMode::SpatialTemporal)
+                      ? computeEarliestStartTime(task_node)
+                      : 0;
+    // Upper bound for the time loop: enough room for all tasks to time-share.
+    int t_max = (mode_ == AllocationMode::SpatialTemporal)
+                    ? t_start + grid_rows_ * grid_cols_ * task_duration
+                    : 0;
 
-      for (int origin_row = 0; origin_row < grid_rows_; ++origin_row) {
-        for (int origin_col = 0; origin_col < grid_cols_; ++origin_col) {
-          // Checks that every cell of the rectangle is within bounds and free.
-          bool valid = true;
-          TaskPlacement candidate;
-          for (auto &[col_off, row_off] : shape_offsets) {
-            int abs_row = origin_row + row_off;
-            int abs_col = origin_col + col_off;
-            if (abs_row < 0 || abs_row >= grid_rows_ || abs_col < 0 ||
-                abs_col >= grid_cols_ || occupied_[abs_row][abs_col]) {
-              valid = false;
-              break;
+    for (int t = t_start; t <= t_max; t += task_duration) {
+      int best_score = INT_MIN;
+      TaskPlacement best_at_t;
+
+      for (const CgraShape &shape : shapes_to_try) {
+        SmallVector<std::pair<int, int>> shape_offsets;
+        if (shape.is_rectangular) {
+          for (int r = 0; r < shape.rows; ++r)
+            for (int c = 0; c < shape.cols; ++c)
+              shape_offsets.push_back({c, r});
+        } else {
+          shape_offsets = SmallVector<std::pair<int, int>>(
+              shape.cgra_positions.begin(), shape.cgra_positions.end());
+        }
+
+        for (int origin_row = 0; origin_row < grid_rows_; ++origin_row) {
+          for (int origin_col = 0; origin_col < grid_cols_; ++origin_col) {
+            // Checks that every cell of the shape is within bounds and free
+            // during [t, t + task_duration).
+            bool valid = true;
+            TaskPlacement candidate;
+            for (auto &[col_off, row_off] : shape_offsets) {
+              int abs_row = origin_row + row_off;
+              int abs_col = origin_col + col_off;
+              if (abs_row < 0 || abs_row >= grid_rows_ || abs_col < 0 ||
+                  abs_col >= grid_cols_ ||
+                  isOccupied(abs_row, abs_col, t, task_duration)) {
+                valid = false;
+                break;
+              }
+              candidate.cgra_positions.push_back(
+                  {abs_row, abs_col, t, task_duration});
             }
-            candidate.cgra_positions.push_back({abs_row, abs_col});
-          }
-          if (!valid) {
-            continue;
-          }
-          // Scores the candidate by proximity to dependent tasks and SRAMs.
-          int score = computeScore(task_node, candidate, graph);
-          if (score > best_score) {
-            best_score = score;
-            best_placement = candidate;
+            if (!valid) {
+              continue;
+            }
+            // Scores the candidate by proximity to dependent tasks and SRAMs.
+            int score = computeScore(task_node, candidate, graph);
+            if (score > best_score) {
+              best_score = score;
+              best_at_t = candidate;
+            }
           }
         }
       }
+
+      if (!best_at_t.cgra_positions.empty()) {
+        // ASAP: accept the earliest time slot that yields a valid placement.
+        return best_at_t;
+      }
+
+      if (mode_ == AllocationMode::Spatial)
+        break;
     }
-    return best_placement;
+
+    return TaskPlacement{};
   }
 
   // Parses a `cgra_shape` IR attribute string into a base CgraShape.
@@ -788,7 +1008,11 @@ private:
 
   int grid_rows_;
   int grid_cols_;
-  std::vector<std::vector<bool>> occupied_;
+  AllocationMode mode_;
+  // Per-CGRA occupancy intervals: cgra_occupancy_[row][col] holds a list of
+  // (start, end_exclusive) pairs representing occupied time windows.
+  // In Spatial mode, non-empty means the CGRA is fully occupied.
+  std::vector<std::vector<SmallVector<std::pair<int, int>, 4>>> cgra_occupancy_;
 };
 
 } // namespace
@@ -801,7 +1025,7 @@ namespace mlir {
 namespace taskflow {
 
 bool RoutingCriticalPathAllocation::runAllocation(func::FuncOp func) {
-  TaskMapper mapper(grid_rows_, grid_cols_);
+  TaskMapper mapper(grid_rows_, grid_cols_, mode_);
   mapper.place(func);
   return true;
 }

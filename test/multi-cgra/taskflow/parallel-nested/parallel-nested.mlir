@@ -42,7 +42,7 @@
 // RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: --allocate-cgra-to-task \
+// RUN: --orchestrate-task-on-cgra \
 // RUN: -o %t.placement.mlir
 // RUN: FileCheck %s --input-file=%t.placement.mlir --check-prefixes=PLACEMENT
 
@@ -180,7 +180,7 @@ module {
 
 // PLACEMENT:      module {
 // PLACEMENT-NEXT:   func.func @parallel_nested_example(%arg0: memref<16xf32>, %arg1: memref<8x8xf32>, %arg2: memref<8x8xf32>, %arg3: memref<8x8xf32>, %arg4: f32) {
-// PLACEMENT-NEXT:     %dependency_read_out, %dependency_write_out = taskflow.task @Task_0 dependency_read_in(%arg0 : memref<16xf32>) dependency_write_in(%arg0 : memref<16xf32>) value_inputs(%arg4 : f32) [original_read_memrefs(%arg0 : memref<16xf32>), original_write_memrefs(%arg0 : memref<16xf32>)] {task_allocation_info = {cgra_positions = [{col = 0 : i32, row = 0 : i32}], read_sram_locations = [{col = 0 : i32, row = 0 : i32}], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<16xf32>, memref<16xf32>, f32) -> (memref<16xf32>, memref<16xf32>) {
+// PLACEMENT-NEXT:     %dependency_read_out, %dependency_write_out = taskflow.task @Task_0 dependency_read_in(%arg0 : memref<16xf32>) dependency_write_in(%arg0 : memref<16xf32>) value_inputs(%arg4 : f32) [original_read_memrefs(%arg0 : memref<16xf32>), original_write_memrefs(%arg0 : memref<16xf32>)] {task_mapping_info = {cgra_positions = [{col = 0 : i32, row = 0 : i32}], read_sram_locations = [{col = 0 : i32, row = 0 : i32}], write_sram_locations = [{col = 0 : i32, row = 0 : i32}]}} : (memref<16xf32>, memref<16xf32>, f32) -> (memref<16xf32>, memref<16xf32>) {
 // PLACEMENT-NEXT:     ^bb0(%arg5: memref<16xf32>, %arg6: memref<16xf32>, %arg7: f32):
 // PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
 // PLACEMENT-NEXT:       %c16 = arith.constant 16 : index
@@ -195,7 +195,7 @@ module {
 // PLACEMENT-NEXT:       }) : (index) -> ()
 // PLACEMENT-NEXT:       taskflow.yield reads(%arg6 : memref<16xf32>) writes(%arg6 : memref<16xf32>)
 // PLACEMENT-NEXT:     }
-// PLACEMENT-NEXT:     %dependency_read_out_0:2, %dependency_write_out_1 = taskflow.task @Task_1 dependency_read_in(%arg1, %arg2 : memref<8x8xf32>, memref<8x8xf32>) dependency_write_in(%arg3 : memref<8x8xf32>) [original_read_memrefs(%arg1, %arg2 : memref<8x8xf32>, memref<8x8xf32>), original_write_memrefs(%arg3 : memref<8x8xf32>)] {task_allocation_info = {cgra_positions = [{col = 1 : i32, row = 0 : i32}], read_sram_locations = [{col = 1 : i32, row = 0 : i32}, {col = 1 : i32, row = 0 : i32}], write_sram_locations = [{col = 1 : i32, row = 0 : i32}]}} : (memref<8x8xf32>, memref<8x8xf32>, memref<8x8xf32>) -> (memref<8x8xf32>, memref<8x8xf32>, memref<8x8xf32>) {
+// PLACEMENT-NEXT:     %dependency_read_out_0:2, %dependency_write_out_1 = taskflow.task @Task_1 dependency_read_in(%arg1, %arg2 : memref<8x8xf32>, memref<8x8xf32>) dependency_write_in(%arg3 : memref<8x8xf32>) [original_read_memrefs(%arg1, %arg2 : memref<8x8xf32>, memref<8x8xf32>), original_write_memrefs(%arg3 : memref<8x8xf32>)] {task_mapping_info = {cgra_positions = [{col = 1 : i32, row = 0 : i32}], read_sram_locations = [{col = 1 : i32, row = 0 : i32}, {col = 1 : i32, row = 0 : i32}], write_sram_locations = [{col = 1 : i32, row = 0 : i32}]}} : (memref<8x8xf32>, memref<8x8xf32>, memref<8x8xf32>) -> (memref<8x8xf32>, memref<8x8xf32>, memref<8x8xf32>) {
 // PLACEMENT-NEXT:     ^bb0(%arg5: memref<8x8xf32>, %arg6: memref<8x8xf32>, %arg7: memref<8x8xf32>):
 // PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
 // PLACEMENT-NEXT:       %c8 = arith.constant 8 : index

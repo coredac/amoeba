@@ -63,38 +63,34 @@ def ClassifyCounters : Pass<"classify-counters", "ModuleOp"> {
   let constructor = "taskflow::createClassifyCountersPass()";
 }
 
-def AllocateCgraToTask : Pass<"allocate-cgra-to-task", "func::FuncOp"> {
-  let summary = "Maps Taskflow tasks onto a 2D multi-CGRA grid array";
-  let description = [{
-    This pass maps Taskflow tasks onto a 2D multi-CGRA grid array.
-    Tasks with direct SSA dependencies (producer-consumer pairs) are placed
-    on adjacent CGRAs to enable direct data forwarding without going through
-    the network.
-
-    Uses a default 4x4 CGRA grid.
-  }];
-  let constructor = "taskflow::createAllocateCgraToTaskPass()";
-}
-
 def OrchestrateTaskOnCgra : Pass<"orchestrate-task-on-cgra", "func::FuncOp"> {
-  let summary = "Orchestrates Taskflow tasks onto a 2D CGRA grid (spatial or "
-                "spatial-temporal)";
+  let summary = "Orchestrates Taskflow tasks onto a 2D multi-CGRA grid "
+                "(spatial or spatial-temporal)";
   let description = [{
-    Maps Taskflow tasks onto a 2D CGRA grid using either a purely spatial or a
-    spatial-temporal allocation strategy, controlled by --allocation-mode.
+    Maps Taskflow tasks onto a 2D multi-CGRA grid using a
+    routing-critical-path-first placement strategy combined with either a
+    purely spatial or a spatial-temporal allocation mode.
+
+    Placement: Tasks with the longest downstream dependency chains are placed
+    first so that their successors can land on adjacent CGRAs, minimising
+    inter-task communication distance.  Tasks with direct SSA dependencies
+    are placed on adjacent CGRAs to enable direct data forwarding.  Irregular
+    multi-CGRA shapes (rectangular, L, T) are supported via the cgra_shape
+    attribute set by the upstream ResourceAwareTaskOptimization pass.
 
     spatial:
-      Each CGRA is assigned to at most one task.  Fails with an assertion when
-      the number of tasks exceeds the grid size (default 3x3 = 9 slots).
+      Each CGRA is assigned to at most one task.  Asserts when the number of
+      tasks exceeds the grid size.
 
     spatial-temporal (default):
-      Adds a time_slot dimension to every CGRA assignment.  Tasks with no data
-      dependencies share the same time slot (spatial parallelism); tasks that
-      would over-subscribe the grid, including independent tasks when all
-      CGRAs are occupied, are scheduled at a later time slot on the same
-      physical CGRAs (temporal reuse).
+      Adds a time_slot dimension to every CGRA assignment.  An ASAP schedule
+      is computed from SSA and memory dependencies (RAW, WAW, WAR); tasks with
+      no data dependencies share the same time slot (spatial parallelism);
+      tasks that would over-subscribe the grid — including independent tasks
+      when all CGRAs are occupied — are scheduled at a later time slot on the
+      same physical CGRAs (temporal reuse).
 
-    Uses a default 3x3 CGRA grid.
+    Uses a default 4x4 CGRA grid.
   }];
   let options = [Option<
       "allocationMode", "allocation-mode", "std::string",
