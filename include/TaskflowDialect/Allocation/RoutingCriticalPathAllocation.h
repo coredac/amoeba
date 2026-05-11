@@ -19,11 +19,11 @@ namespace mlir {
 namespace taskflow {
 
 /// Controls whether a time-slot dimension is added to every CGRA assignment.
-enum class AllocationMode {
+enum class OrchestrationMode {
   /// Each CGRA is assigned to at most one task.  Asserts if tasks exceed the
   /// grid size.
   Spatial,
-  /// Adds a time_slot dimension.  Tasks that would over-subscribe the grid
+  /// Adds a time-slot dimension.  Tasks that would over-subscribe the grid
   /// are scheduled at a later time slot, enabling temporal reuse of CGRAs.
   SpatialTemporal,
 };
@@ -40,16 +40,16 @@ enum class AllocationMode {
 ///
 /// In SpatialTemporal mode each task also receives a start_time (ASAP
 /// scheduling) and duration (from profiling or analytical estimation).
-/// The output attribute on each taskflow.task op is `task_mapping_info`.
+/// The output attribute on each taskflow.task op is `task_orchestration_info`.
 class RoutingCriticalPathAllocation : public Allocation {
 public:
   RoutingCriticalPathAllocation(
       int grid_rows = kCgraGridRows, int grid_cols = kCgraGridCols,
-      AllocationMode mode = AllocationMode::SpatialTemporal)
+      OrchestrationMode mode = OrchestrationMode::SpatialTemporal)
       : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {}
 
   /// Places all taskflow.task ops in `func` onto the grid, annotating each
-  /// with a `task_mapping_info` attribute.  Returns true on success.
+  /// with a `task_orchestration_info` attribute.  Returns true on success.
   bool runAllocation(mlir::func::FuncOp func) override;
 
   std::string getName() const override { return "routing-critical-path-first"; }
@@ -57,7 +57,7 @@ public:
 private:
   int grid_rows_;
   int grid_cols_;
-  AllocationMode mode_;
+  OrchestrationMode mode_;
 };
 
 } // namespace taskflow

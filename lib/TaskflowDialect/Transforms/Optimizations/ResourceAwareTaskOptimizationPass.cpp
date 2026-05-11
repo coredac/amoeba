@@ -241,7 +241,7 @@ public:
       // If the task already has profiling attributes (e.g., from fusion),
       // skip expensive speculative lowering and use those directly.
       bool has_precomputed =
-          task->hasAttr("compiled_ii") && task->hasAttr("task_duration");
+          task->hasAttr("compiled_ii") && task->hasAttr("profile_info");
       if (!has_precomputed) {
         // Speculative lowering to Neura to get real metrics.
         profileTask(node.get(), task, skip_mapper);
@@ -255,9 +255,9 @@ public:
       }
 
       // Overrides with explicit attributes if present.
-      if (auto attr = task->getAttrOfType<IntegerAttr>("task_duration")) {
-        node->steps = attr.getInt();
-      }
+      if (auto profile = task->getAttrOfType<DictionaryAttr>("profile_info"))
+        if (auto dur = dyn_cast_or_null<IntegerAttr>(profile.get("duration")))
+          node->steps = dur.getInt();
       if (auto attr = task->getAttrOfType<IntegerAttr>("compiled_ii")) {
         node->ii = attr.getInt();
       }
@@ -1550,11 +1550,18 @@ private:
       TaskGraphNode fused_node(/*id=*/0, fused_task);
       fused_node.trip_count = fused_trip;
       profile_fn(&fused_node, fused_task);
-      fused_task->setAttr(
-          "task_duration", OpBuilder(fused_task).getI64IntegerAttr(fused_node.steps));
-      fused_task->setAttr(
-          "compiled_ii",
-          OpBuilder(fused_task).getI64IntegerAttr(fused_node.ii));
+      {
+        OpBuilder b(fused_task);
+        MLIRContext *ctx = fused_task->getContext();
+        SmallVector<NamedAttribute, 1> profile_attrs;
+        profile_attrs.push_back(NamedAttribute(
+            StringAttr::get(ctx, "duration"),
+            b.getI32IntegerAttr(fused_node.steps)));
+        fused_task->setAttr("profile_info",
+                            DictionaryAttr::get(ctx, profile_attrs));
+        fused_task->setAttr("compiled_ii",
+                            b.getI64IntegerAttr(fused_node.ii));
+      }
     }
 
     // Step 7: Replaces uses of original tasks' results.
@@ -1772,7 +1779,13 @@ struct ResourceAwareTaskOptimizationPass
             node->op->setAttr("compiled_ii", b.getI32IntegerAttr(node->ii));
           }
           if (node->steps != kUnprofiled) {
-            node->op->setAttr("task_duration", b.getI32IntegerAttr(node->steps));
+            SmallVector<NamedAttribute, 1> profile_attrs;
+            profile_attrs.push_back(NamedAttribute(
+                StringAttr::get(b.getContext(), "duration"),
+                b.getI32IntegerAttr(node->steps)));
+            node->op->setAttr(
+                "profile_info",
+                DictionaryAttr::get(b.getContext(), profile_attrs));
           }
           if (node->trip_count > 0) {
             node->op->setAttr("trip_count",
@@ -1814,7 +1827,15 @@ struct ResourceAwareTaskOptimizationPass
           node->op->setAttr("cgra_count",
                             b.getI32IntegerAttr(node->cgra_count));
           node->op->setAttr("compiled_ii", b.getI32IntegerAttr(node->ii));
-          node->op->setAttr("task_duration", b.getI32IntegerAttr(node->steps));
+          {
+            SmallVector<NamedAttribute, 1> profile_attrs;
+            profile_attrs.push_back(NamedAttribute(
+                StringAttr::get(b.getContext(), "duration"),
+                b.getI32IntegerAttr(node->steps)));
+            node->op->setAttr(
+                "profile_info",
+                DictionaryAttr::get(b.getContext(), profile_attrs));
+          }
           node->op->setAttr("trip_count",
                             b.getI32IntegerAttr(node->trip_count));
           // Writes cgra_shape attribute: simple "NxM" bounding-box string.

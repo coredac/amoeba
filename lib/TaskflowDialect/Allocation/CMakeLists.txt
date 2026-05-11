@@ -10,8 +10,6 @@ add_mlir_library(MLIRTaskflowAllocation
     MLIRPass
     MLIRSupport
     MLIRFuncDialect
-    MLIRArithDialect
     MLIRTaskflow
-    MLIRNeura
     LLVMSupport
 )

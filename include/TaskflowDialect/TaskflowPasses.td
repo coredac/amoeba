@@ -69,7 +69,7 @@ def OrchestrateTaskOnCgra : Pass<"orchestrate-task-on-cgra", "func::FuncOp"> {
   let description = [{
     Maps Taskflow tasks onto a 2D multi-CGRA grid using a
     routing-critical-path-first placement strategy combined with either a
-    purely spatial or a spatial-temporal allocation mode.
+    purely spatial or a spatial-temporal orchestration mode.
 
     Placement: Tasks with the longest downstream dependency chains are placed
     first so that their successors can land on adjacent CGRAs, minimising
@@ -93,11 +93,11 @@ def OrchestrateTaskOnCgra : Pass<"orchestrate-task-on-cgra", "func::FuncOp"> {
     Uses a default 4x4 CGRA grid.
   }];
   let options = [Option<
-      "allocationMode", "allocation-mode", "std::string",
+      "orchestrationMode", "orchestration-mode", "std::string",
       /*default=*/"\"spatial-temporal\"",
-      "Task allocation mode: 'spatial' (one task per CGRA, asserts if tasks > "
-      "grid size) or 'spatial-temporal' (default, time-multiplexes CGRAs so "
-      "task count is not bounded by grid size).">];
+      "Task orchestration mode: 'spatial' (one task per CGRA, asserts if "
+      "tasks exceed the grid size) or 'spatial-temporal' (default, "
+      "time-multiplexes CGRAs so task count is not bounded by grid size).">];
   let constructor = "taskflow::createOrchestrateTaskOnCgraPass()";
 }
 
