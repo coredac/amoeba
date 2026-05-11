@@ -986,7 +986,7 @@ module attributes {torch.debug_module_name = "SimpleResNetBlock"} {
 // RESOPT-NEXT:       taskflow.yield reads(%arg1 : memref<1x8x8x64xf32>) writes(%arg2, %arg3 : memref<1x64x8x8xf32>, memref<1x10x10x64xf32>)
 // RESOPT-NEXT:     }
 // RESOPT-NEXT:     %alloc_12 = memref.alloc() {alignment = 64 : i64} : memref<1x8x8x64xf32>
-// RESOPT-NEXT:     %dependency_read_out_13, %dependency_write_out_14:2 = taskflow.task @Task_6_Task_8_utilfused dependency_read_in(%dependency_write_out_11#0 : memref<1x64x8x8xf32>) dependency_write_in(%alloc_8, %alloc_12 : memref<1x8x8x64xf32>, memref<1x8x8x64xf32>) value_inputs(%cst_2 : f32) [original_read_memrefs(%alloc_7 : memref<1x64x8x8xf32>), original_write_memrefs(%alloc_8, %alloc_12 : memref<1x8x8x64xf32>, memref<1x8x8x64xf32>)] {cgra_count = 2 : i32, cgra_shape = "1x2", compiled_ii = 2 : i32, profile_info = {duration = 3 : i32}, trip_count = 4096 : i32} : (memref<1x64x8x8xf32>, memref<1x8x8x64xf32>, memref<1x8x8x64xf32>, f32) -> (memref<1x64x8x8xf32>, memref<1x8x8x64xf32>, memref<1x8x8x64xf32>) {
+// RESOPT-NEXT:     %dependency_read_out_13, %dependency_write_out_14:2 = taskflow.task @Task_6_Task_8_utilfused dependency_read_in(%dependency_write_out_11#0 : memref<1x64x8x8xf32>) dependency_write_in(%alloc_8, %alloc_12 : memref<1x8x8x64xf32>, memref<1x8x8x64xf32>) value_inputs(%cst_2 : f32) [original_read_memrefs(%alloc_7 : memref<1x64x8x8xf32>), original_write_memrefs(%alloc_8, %alloc_12 : memref<1x8x8x64xf32>, memref<1x8x8x64xf32>)] {cgra_count = 2 : i32, cgra_shape = "1x2", compiled_ii = 3 : i32, profile_info = {duration = 3 : i32}, trip_count = 4096 : i32} : (memref<1x64x8x8xf32>, memref<1x8x8x64xf32>, memref<1x8x8x64xf32>, f32) -> (memref<1x64x8x8xf32>, memref<1x8x8x64xf32>, memref<1x8x8x64xf32>) {
 // RESOPT-NEXT:     ^bb0(%arg1: memref<1x64x8x8xf32>, %arg2: memref<1x8x8x64xf32>, %arg3: memref<1x8x8x64xf32>, %arg4: f32):
 // RESOPT-NEXT:       %c64 = arith.constant 64 : index
 // RESOPT-NEXT:       %c8 = arith.constant 8 : index
@@ -1089,4 +1089,4 @@ module attributes {torch.debug_module_name = "SimpleResNetBlock"} {
 // RESOPT-NEXT:     }
 // RESOPT-NEXT:     return %dependency_write_out_19 : memref<1x64x8x8xf32>
 // RESOPT-NEXT:   }
-// RESOPT-NEXT: } 
+// RESOPT-NEXT: }
