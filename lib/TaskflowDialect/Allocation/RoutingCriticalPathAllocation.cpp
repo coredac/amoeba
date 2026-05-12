@@ -210,16 +210,16 @@ public:
       }
     }
 
-    // Phase 3: Build explicit task dependency edges. Taskflow memory
-    // dependencies are represented by dependency_read_in/dependency_write_in
-    // operands, while scalar/value dependencies use value_inputs.
+    // Phase 3: Build explicit task dependency edges. Keep scalar/value SSA
+    // dependencies visible through value_inputs, and also scan all operands to
+    // catch taskflow dependency_read_in/dependency_write_in token edges.
     for (auto &consumer_node : task_nodes) {
+      for (Value value_input : consumer_node->op.getValueInputs()) {
+        addProducerDependency(value_input, consumer_node.get());
+      }
+
       for (Value operand : consumer_node->op->getOperands()) {
-        if (auto producer_op = operand.getDefiningOp<TaskflowTaskOp>()) {
-          if (auto *producer_node = op_to_node[producer_op]) {
-            addDependencyEdge(producer_node, consumer_node.get());
-          }
-        }
+        addProducerDependency(operand, consumer_node.get());
       }
     }
   }
@@ -234,6 +234,14 @@ private:
     memref_to_node[memref] = ptr;
     memory_nodes.push_back(std::move(node));
     return ptr;
+  }
+
+  void addProducerDependency(Value operand, TaskNode *consumer) {
+    if (auto producer_op = operand.getDefiningOp<TaskflowTaskOp>()) {
+      if (auto *producer = op_to_node[producer_op]) {
+        addDependencyEdge(producer, consumer);
+      }
+    }
   }
 
   void addDependencyEdge(TaskNode *producer, TaskNode *consumer) {
