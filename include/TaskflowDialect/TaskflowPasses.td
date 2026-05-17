@@ -63,6 +63,44 @@ def ClassifyCounters : Pass<"classify-counters", "ModuleOp"> {
   let constructor = "taskflow::createClassifyCountersPass()";
 }
 
+def ClassifyTasks : Pass<"classify-tasks", "ModuleOp"> {
+  let summary = "Classifies taskflow.task ops by iteration-count predictability";
+  let description = [{
+    Inspects the taskflow.counter chain inside every taskflow.task op and
+    attaches a "task_type" string attribute with one of three values:
+
+      "static"
+        All counter bounds (lower, upper, step) are arith.constant ops
+        created inside the task body.  The total iteration count is fully
+        determined at compile time.
+
+      "symbol_dynamic"
+        At least one counter bound is a value_input that traces back to a
+        function argument or a memref.dim of a function argument.  The
+        iteration count is not known at compile time, but it is fixed for
+        the entire function invocation and therefore known before the task
+        is launched (e.g. the sequence length in a transformer model).
+
+      "irregular_dynamic"
+        At least one counter bound depends on a value produced by a
+        preceding task (e.g. a sparse pointer array entry).  The iteration
+        count can only be determined after those earlier tasks have
+        finished executing.
+
+    The most-dynamic category across all counters in a task wins:
+    irregular_dynamic > symbol_dynamic > static.
+
+    This classification is consumed by downstream passes (e.g. scheduling
+    and resource allocation) to decide how iteration counts are communicated
+    to the CGRA controller at runtime.
+  }];
+  let constructor = "taskflow::createClassifyTasksPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
 def OrchestrateTaskOnCgra : Pass<"orchestrate-task-on-cgra", "func::FuncOp"> {
   let summary = "Orchestrates Taskflow tasks onto a 2D multi-CGRA grid "
                 "(spatial or spatial-temporal)";
