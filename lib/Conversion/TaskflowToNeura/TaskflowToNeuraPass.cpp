@@ -397,10 +397,16 @@ struct InternalizeCounterPattern : public OpRewritePattern<neura::KernelOp> {
       Value step = resolveBoundValue(source_counter.getStep());
 
       // Creates neura.counter op.
+      // counter_type on taskflow.counter is ArrayAttr [structural, bound_kind].
+      // Pass the full ArrayAttr through to neura.counter unchanged.
+      ArrayAttr counter_type_attr;
+      if (auto arr = source_counter.getCounterType())
+        counter_type_attr = *arr;
+      else
+        counter_type_attr = rewriter.getArrayAttr({});
       neura::CounterOp new_counter_op = rewriter.create<neura::CounterOp>(
           source_counter.getLoc(), old_counter_arg.getType(), lb, ub, step,
-          source_counter.getCounterTypeAttr(),
-          source_counter.getCounterIdAttr());
+          counter_type_attr, source_counter.getCounterIdAttr());
       mapping.map(old_counter_arg, new_counter_op.getCurrentIndex());
     }
 
