@@ -100,6 +100,15 @@ static BoundKind classifyTaskBoundValue(Value v, TaskflowTaskOp task_op) {
     if (isa<arith::ConstantOp, arith::ConstantIndexOp>(def)) {
       return BoundKind::Static;
     }
+    // affine.apply is a pure affine computation; its dynamism is fully
+    // determined by its operands (e.g. affine_map<()[s0]->(s0-2)>()[%n]).
+    if (isa<affine::AffineApplyOp>(def)) {
+      BoundKind k = BoundKind::Static;
+      for (Value operand : def->getOperands()) {
+        k = worstCase(k, classifyTaskBoundValue(operand, task_op));
+      }
+      return k;
+    }
     // Any other computed value is data-dependent.
     return BoundKind::IrregularDynamic;
   }
