@@ -46,30 +46,36 @@ static StringRef boundKindToStr(BoundKind k) {
 static BoundKind classifyOuterValue(Value v) {
   if (auto block_arg = dyn_cast<BlockArgument>(v)) {
     auto *parent_region = block_arg.getParentRegion();
-    if (parent_region && isa<func::FuncOp>(parent_region->getParentOp()))
+    if (parent_region && isa<func::FuncOp>(parent_region->getParentOp())) {
       return BoundKind::SymbolDynamic;
+    }
     return BoundKind::IrregularDynamic;
   }
   Operation *def = v.getDefiningOp();
-  if (!def)
+  if (!def) {
     return BoundKind::IrregularDynamic;
-  if (isa<arith::ConstantOp, arith::ConstantIndexOp>(def))
+  }
+  if (isa<arith::ConstantOp, arith::ConstantIndexOp>(def)) {
     return BoundKind::Static;
-  if (isa<memref::DimOp>(def))
+  }
+  if (isa<memref::DimOp>(def)) {
     return BoundKind::SymbolDynamic;
+  }
   return BoundKind::IrregularDynamic;
 }
 
 // Classifies a bound value inside a taskflow.task body.
 static BoundKind classifyTaskBoundValue(Value v, TaskflowTaskOp task_op) {
   if (Operation *def = v.getDefiningOp()) {
-    if (isa<arith::ConstantOp, arith::ConstantIndexOp>(def))
+    if (isa<arith::ConstantOp, arith::ConstantIndexOp>(def)) {
       return BoundKind::Static;
+    }
     return BoundKind::IrregularDynamic;
   }
   auto block_arg = dyn_cast<BlockArgument>(v);
-  if (!block_arg)
+  if (!block_arg) {
     return BoundKind::IrregularDynamic;
+  }
 
   unsigned num_dep_read = task_op.getDependencyReadIn().size();
   unsigned num_dep_write = task_op.getDependencyWriteIn().size();
@@ -92,8 +98,9 @@ static BoundKind classifyCounterBound(TaskflowCounterOp counter_op,
                                       TaskflowTaskOp task_op) {
   BoundKind k = BoundKind::Static;
   for (Value bound : {counter_op.getLowerBound(), counter_op.getUpperBound(),
-                      counter_op.getStep()})
+                      counter_op.getStep()}) {
     k = worstCase(k, classifyTaskBoundValue(bound, task_op));
+  }
   return k;
 }
 
@@ -107,21 +114,24 @@ void classifyCountersInTask(TaskflowTaskOp task_op) {
   task_op.walk(
       [&](TaskflowCounterOp counter_op) { counters.push_back(counter_op); });
 
-  if (counters.empty())
+  if (counters.empty()) {
     return;
+  }
 
   // Builds parent-child relationships.
   // Maps from counter results to counter ops.
   DenseMap<Value, TaskflowCounterOp> value_to_counter;
-  for (TaskflowCounterOp counter_op : counters)
+  for (TaskflowCounterOp counter_op : counters) {
     value_to_counter[counter_op.getCounterIndex()] = counter_op;
+  }
 
   // Finds which counters have children.
   DenseSet<TaskflowCounterOp> counters_with_children;
   for (TaskflowCounterOp counter_op : counters) {
     if (auto parent_idx = counter_op.getParentIndex()) {
-      if (auto parent_counter = value_to_counter.lookup(parent_idx))
+      if (auto parent_counter = value_to_counter.lookup(parent_idx)) {
         counters_with_children.insert(parent_counter);
+      }
     }
   }
 
