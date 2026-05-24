@@ -162,7 +162,8 @@ def TaskflowCounterOp : TaskflowOpBase<"counter", []> {
       Index:$lower_bound,
       Index:$upper_bound,
       Index:$step,
-      OptionalAttr<ArrayAttr>:$counter_type,
+      OptionalAttr<StrAttr>:$counter_hierarchy,
+      OptionalAttr<StrAttr>:$counter_dynamism,
       OptionalAttr<I32Attr>:$counter_id);
 
   let results = (outs AnyType:$counter_index);

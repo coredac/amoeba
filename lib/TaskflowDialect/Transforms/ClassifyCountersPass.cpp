@@ -162,10 +162,10 @@ void classifyCountersInTask(TaskflowTaskOp task_op) {
     StringRef bound_type =
         boundKindToStr(classifyCounterBound(counter_op, task_op));
 
-    // counter_type is an ArrayAttr: [structural_role, bound_kind]
-    counter_op.setCounterTypeAttr(
-        builder.getArrayAttr({builder.getStringAttr(structural_type),
-                              builder.getStringAttr(bound_type)}));
+    // Sets counter_hierarchy (structural role) and counter_dynamism (bound
+    // kind).
+    counter_op.setCounterHierarchyAttr(builder.getStringAttr(structural_type));
+    counter_op.setCounterDynamismAttr(builder.getStringAttr(bound_type));
     // Sets the counter id attribute.
     counter_op.setCounterIdAttr(builder.getI32IntegerAttr(global_counter_id++));
   }

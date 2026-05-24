@@ -84,7 +84,7 @@ static BoundKind classifyOuterValue(Value v) {
   if (auto dim_op = dyn_cast<memref::DimOp>(def)) {
     // Shapes are fixed at allocation time and no task can change them, so the
     // result of memref.dim is always known before any task that uses it as a
-    // value_input is launched → symbol_dynamic。
+    // value_input is launched → symbol_dynamic.
     return BoundKind::SymbolDynamic;
   }
 

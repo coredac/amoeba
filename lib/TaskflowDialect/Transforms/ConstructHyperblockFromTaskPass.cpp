@@ -169,7 +169,8 @@ createCounterChain(OpBuilder &builder, Location loc,
         /*lower_bound*/ lb,
         /*upper_bound*/ up,
         /*step*/ step,
-        /*counter_type*/ ArrayAttr{},
+        /*counter_hierarchy*/ StringAttr{},
+        /*counter_dynamism*/ StringAttr{},
         /*counter_id*/ IntegerAttr{});
 
     info.counter_index = counter_op.getCounterIndex();
