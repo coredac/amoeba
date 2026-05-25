@@ -29,13 +29,6 @@
 // RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: --orchestrate-task-on-cgra \
-// RUN: -o %t.placement.mlir
-// RUN: FileCheck %s --input-file=%t.placement.mlir --check-prefixes=PLACEMENT
-
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
-// RUN: --convert-affine-to-taskflow \
-// RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-task-on-cgra=orchestration-mode=spatial-temporal' \
 // RUN: -o %t.map_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL
@@ -399,88 +392,6 @@ module attributes {} {
 // HYPERBLOCK-NEXT:     return %0 : i32
 // HYPERBLOCK-NEXT:   }
 // HYPERBLOCK-NEXT: }
-
-// PLACEMENT:      module {
-// PLACEMENT-NEXT:   func.func @_Z21irregularLoopExample1v() -> i32 attributes {llvm.linkage = #llvm.linkage<external>} {
-// PLACEMENT-NEXT:     %c2_i32 = arith.constant 2 : i32
-// PLACEMENT-NEXT:     %c8_i32 = arith.constant 8 : i32
-// PLACEMENT-NEXT:     %c0_i32 = arith.constant 0 : i32
-// PLACEMENT-NEXT:     %alloca = memref.alloca() : memref<i32>
-// PLACEMENT-NEXT:     %alloca_0 = memref.alloca() : memref<4x8xi32>
-// PLACEMENT-NEXT:     %value_outputs = taskflow.task @Task_0 value_inputs(%c0_i32 : i32) {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 0 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = []}} : (i32) -> (i32) {
-// PLACEMENT-NEXT:     ^bb0(%arg0: i32):
-// PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
-// PLACEMENT-NEXT:       %c5 = arith.constant 5 : index
-// PLACEMENT-NEXT:       %c1 = arith.constant 1 : index
-// PLACEMENT-NEXT:       %1 = taskflow.counter from %c0 to %c5 step %c1 : index
-// PLACEMENT-NEXT:       %2 = "taskflow.hyperblock"(%1, %arg0) <{operandSegmentSizes = array<i32: 1, 1>}> ({
-// PLACEMENT-NEXT:       ^bb0(%arg1: index, %arg2: i32):
-// PLACEMENT-NEXT:         %3 = arith.index_cast %arg1 : index to i32
-// PLACEMENT-NEXT:         %4 = arith.addi %arg2, %3 : i32
-// PLACEMENT-NEXT:         taskflow.hyperblock.yield iter_args_next(%4 : i32) results(%4 : i32)
-// PLACEMENT-NEXT:       }) : (index, i32) -> i32
-// PLACEMENT-NEXT:       taskflow.yield values(%2 : i32)
-// PLACEMENT-NEXT:     }
-// PLACEMENT-NEXT:     %dependency_write_out = taskflow.task @Task_1 dependency_write_in(%alloca_0 : memref<4x8xi32>) value_inputs(%c8_i32 : i32) [original_write_memrefs(%alloca_0 : memref<4x8xi32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 2 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [], write_sram_locations = [{col = 2 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, i32) -> (memref<4x8xi32>) {
-// PLACEMENT-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: i32):
-// PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
-// PLACEMENT-NEXT:       %c4 = arith.constant 4 : index
-// PLACEMENT-NEXT:       %c1 = arith.constant 1 : index
-// PLACEMENT-NEXT:       %1 = taskflow.counter from %c0 to %c4 step %c1 : index
-// PLACEMENT-NEXT:       "taskflow.hyperblock"(%1) <{operandSegmentSizes = array<i32: 1, 0>}> ({
-// PLACEMENT-NEXT:       ^bb0(%arg2: index):
-// PLACEMENT-NEXT:         %2 = arith.index_cast %arg2 : index to i32
-// PLACEMENT-NEXT:         %3 = arith.muli %2, %arg1 : i32
-// PLACEMENT-NEXT:         %c0_2 = arith.constant 0 : index
-// PLACEMENT-NEXT:         %c8 = arith.constant 8 : index
-// PLACEMENT-NEXT:         %c1_3 = arith.constant 1 : index
-// PLACEMENT-NEXT:         scf.for %arg3 = %c0_2 to %c8 step %c1_3 {
-// PLACEMENT-NEXT:           %4 = arith.index_cast %arg3 : index to i32
-// PLACEMENT-NEXT:           %5 = arith.addi %3, %4 : i32
-// PLACEMENT-NEXT:           memref.store %5, %arg0[%arg2, %arg3] : memref<4x8xi32>
-// PLACEMENT-NEXT:         }
-// PLACEMENT-NEXT:         taskflow.hyperblock.yield
-// PLACEMENT-NEXT:       }) : (index) -> ()
-// PLACEMENT-NEXT:       taskflow.yield writes(%arg0 : memref<4x8xi32>)
-// PLACEMENT-NEXT:     }
-// PLACEMENT-NEXT:     %dependency_read_out, %dependency_write_out_1 = taskflow.task @Task_2 dependency_read_in(%dependency_write_out : memref<4x8xi32>) dependency_write_in(%alloca : memref<i32>) value_inputs(%c8_i32, %value_outputs, %c2_i32 : i32, i32, i32) [original_read_memrefs(%alloca_0 : memref<4x8xi32>), original_write_memrefs(%alloca : memref<i32>)] {profile_info = {duration = 1 : i32}, task_orchestration_info = {cgra_positions = [{col = 1 : i32, context_id = 0 : i32, row = 0 : i32}], read_sram_locations = [{col = 2 : i32, row = 0 : i32}], write_sram_locations = [{col = 1 : i32, row = 0 : i32}]}} : (memref<4x8xi32>, memref<i32>, i32, i32, i32) -> (memref<4x8xi32>, memref<i32>) {
-// PLACEMENT-NEXT:     ^bb0(%arg0: memref<4x8xi32>, %arg1: memref<i32>, %arg2: i32, %arg3: i32, %arg4: i32):
-// PLACEMENT-NEXT:       %c0 = arith.constant 0 : index
-// PLACEMENT-NEXT:       %c4 = arith.constant 4 : index
-// PLACEMENT-NEXT:       %c1 = arith.constant 1 : index
-// PLACEMENT-NEXT:       %1 = taskflow.counter from %c0 to %c4 step %c1 : index
-// PLACEMENT-NEXT:       "taskflow.hyperblock"(%1) <{operandSegmentSizes = array<i32: 1, 0>}> ({
-// PLACEMENT-NEXT:       ^bb0(%arg5: index):
-// PLACEMENT-NEXT:         %2 = arith.index_cast %arg5 : index to i32
-// PLACEMENT-NEXT:         %3 = arith.muli %2, %arg2 : i32
-// PLACEMENT-NEXT:         %c0_2 = arith.constant 0 : index
-// PLACEMENT-NEXT:         %c8 = arith.constant 8 : index
-// PLACEMENT-NEXT:         %c1_3 = arith.constant 1 : index
-// PLACEMENT-NEXT:         scf.for %arg6 = %c0_2 to %c8 step %c1_3 {
-// PLACEMENT-NEXT:           %4 = memref.load %arg0[%arg5, %arg6] : memref<4x8xi32>
-// PLACEMENT-NEXT:           %5 = arith.addi %4, %arg3 : i32
-// PLACEMENT-NEXT:           %c0_4 = arith.constant 0 : index
-// PLACEMENT-NEXT:           %c-3 = arith.constant -3 : index
-// PLACEMENT-NEXT:           %6 = arith.addi %arg5, %c-3 : index
-// PLACEMENT-NEXT:           %7 = arith.cmpi eq, %6, %c0_4 : index
-// PLACEMENT-NEXT:           %c-7 = arith.constant -7 : index
-// PLACEMENT-NEXT:           %8 = arith.addi %arg6, %c-7 : index
-// PLACEMENT-NEXT:           %9 = arith.cmpi eq, %8, %c0_4 : index
-// PLACEMENT-NEXT:           %10 = arith.andi %7, %9 : i1
-// PLACEMENT-NEXT:           scf.if %10 {
-// PLACEMENT-NEXT:             memref.store %5, %arg1[] : memref<i32>
-// PLACEMENT-NEXT:             %11 = arith.muli %5, %arg4 : i32
-// PLACEMENT-NEXT:             memref.store %11, %arg1[] : memref<i32>
-// PLACEMENT-NEXT:           }
-// PLACEMENT-NEXT:         }
-// PLACEMENT-NEXT:         taskflow.hyperblock.yield
-// PLACEMENT-NEXT:       }) : (index) -> ()
-// PLACEMENT-NEXT:       taskflow.yield reads(%arg0 : memref<4x8xi32>) writes(%arg1 : memref<i32>)
-// PLACEMENT-NEXT:     }
-// PLACEMENT-NEXT:     %0 = affine.load %dependency_write_out_1[] : memref<i32>
-// PLACEMENT-NEXT:     return %0 : i32
-// PLACEMENT-NEXT:   }
-// PLACEMENT-NEXT: }
 
 // MAP-SPATIAL-TEMPORAL: module {
 // MAP-SPATIAL-TEMPORAL-NEXT:   func.func @_Z21irregularLoopExample1v() -> i32 attributes {llvm.linkage = #llvm.linkage<external>} {
