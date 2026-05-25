@@ -49,53 +49,32 @@ def ConstructHyperblockFromTask
   let constructor = "taskflow::createConstructHyperblockFromTaskPass()";
 }
 
-def ClassifyCounters : Pass<"classify-counters", "ModuleOp"> {
-  let summary = "Classifies counters as root/relay/leaf";
+def ClassifyTaskAndCounter : Pass<"classify-task-and-counter", "ModuleOp"> {
+  let summary = "Classifies taskflow counters (hierarchy/dynamism/id) and "
+                "tasks (task_type) in a single pass";
   let description = [{
-    Analyzes the counter hierarchy within taskflow.task operations and
-    classifies each counter:
-    - root: Top-level counter with no parent
-    - relay: Intermediate counter with both parent and child counters
-    - leaf: Innermost counter with no child counters
+    Annotates every taskflow.task and its contained taskflow.counter ops.
 
-    Leaf counters are mapped to CGRA tile arrays.
+    Per counter:
+      counter_hierarchy – structural role in the loop nest:
+        "root"   : outermost loop (no parent, has children)
+        "relay"  : middle loop   (has parent and children)
+        "leaf"   : innermost loop (no children; also single-loop tasks)
+
+      counter_dynamism – bound predictability:
+        "static"            : all bounds are compile-time constants
+        "symbol_dynamic"    : bounds trace to function args / memref.dim
+        "irregular_dynamic" : bounds depend on earlier task outputs
+
+      counter_id – unique integer index within the task (0-based)
+
+    Per task:
+      task_type – worst-case counter_dynamism across all counters
+        ("irregular_dynamic" > "symbol_dynamic" > "static")
   }];
-  let constructor = "taskflow::createClassifyCountersPass()";
-}
-
-def ClassifyTasks : Pass<"classify-tasks", "ModuleOp"> {
-  let summary = "Classifies taskflow.task ops by iteration-count predictability";
-  let description = [{
-    Inspects the taskflow.counter chain inside every taskflow.task op and
-    attaches a "task_type" string attribute with one of three values:
-
-      "static"
-        All counter bounds (lower, upper, step) are arith.constant ops
-        created inside the task body.  The total iteration count is fully
-        determined at compile time.
-
-      "symbol_dynamic"
-        At least one counter bound is a value_input that traces back to a
-        function argument or a memref.dim of a function argument.  The
-        iteration count is not known at compile time, but it is fixed for
-        the entire function invocation and therefore known before the task
-        is launched (e.g. the sequence length in a transformer model).
-
-      "irregular_dynamic"
-        At least one counter bound depends on a value produced by a
-        preceding task (e.g. a sparse pointer array entry).  The iteration
-        count can only be determined after those earlier tasks have
-        finished executing.
-
-    The most-dynamic category across all counters in a task wins:
-    irregular_dynamic > symbol_dynamic > static.
-
-    This classification is consumed by downstream passes (e.g. scheduling
-    and resource allocation) to decide how iteration counts are communicated
-    to the CGRA controller at runtime.
-  }];
-  let constructor = "taskflow::createClassifyTasksPass()";
-  let dependentDialects = ["mlir::arith::ArithDialect",
+  let constructor = "taskflow::createClassifyTaskAndCounterPass()";
+  let dependentDialects = ["mlir::affine::AffineDialect",
+                           "mlir::arith::ArithDialect",
                            "mlir::func::FuncDialect",
                            "mlir::memref::MemRefDialect",
                            "mlir::taskflow::TaskflowDialect"];

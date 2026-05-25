@@ -13,7 +13,7 @@
 
 // RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: --classify-counters \
+// RUN: --classify-task-and-counter \
 // RUN: --convert-taskflow-to-neura \
 // RUN: --lower-affine \
 // RUN: --convert-scf-to-cf \
@@ -28,7 +28,7 @@
 
 // RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: --classify-counters \
+// RUN: --classify-task-and-counter \
 // RUN: --convert-taskflow-to-neura \
 // RUN: --lower-affine \
 // RUN: --convert-scf-to-cf \
@@ -50,7 +50,7 @@
 
 // RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
-// RUN: --classify-counters \
+// RUN: --classify-task-and-counter \
 // RUN: --convert-taskflow-to-neura \
 // RUN: --lower-affine \
 // RUN: --convert-scf-to-cf \

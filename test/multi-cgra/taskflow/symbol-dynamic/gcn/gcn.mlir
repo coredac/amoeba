@@ -13,8 +13,7 @@
 // RUN: mlir-neura-opt %t.taskflow.mlir \
 // RUN:   --construct-hyperblock-from-task \
 // RUN:   --cse \
-// RUN:   --classify-tasks \
-// RUN:   --classify-counters \
+// RUN:   --classify-task-and-counter \
 // RUN:   --convert-taskflow-to-neura \
 // RUN:   -o %t.neura.mlir
 // RUN: FileCheck --input-file=%t.neura.mlir %s --check-prefix=NEURA
