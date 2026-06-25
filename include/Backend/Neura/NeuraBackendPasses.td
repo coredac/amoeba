@@ -50,14 +50,19 @@ def OrchestrateTasksOnAccelerators
   let summary = "Orchestrate Taskflow tasks on a Neura multi-CGRA grid";
   let description = [{
     Computes task resource allocation, placement, and scheduling for the
-    Neura multi-CGRA architecture. The current strategy prioritizes routing
-    critical paths and supports spatial and spatial-temporal scheduling.
+    Neura multi-CGRA architecture. Selects an orchestration strategy and
+    invokes the shared scheduler. The routing-critical-path strategy is the
+    default and supports spatial and spatial-temporal scheduling.
   }];
   let options = [Option<
       "schedulingMode", "scheduling-mode", "std::string",
       /*default=*/"\"spatial-temporal\"",
       "Task scheduling mode: 'spatial' (one task per CGRA) or "
-      "'spatial-temporal' (time-multiplexes CGRAs).">];
+      "'spatial-temporal' (time-multiplexes CGRAs).">,
+    Option<
+      "orchestrationStrategy", "orchestration-strategy", "std::string",
+      /*default=*/"\"routing-critical-path\"",
+      "Task orchestration strategy: 'routing-critical-path' (default).">];
   let constructor =
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
