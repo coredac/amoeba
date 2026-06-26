@@ -125,6 +125,12 @@ public:
   bool schedule(func::FuncOp func, const TaskPriorityMap &priority);
 
 private:
+  // Chooses the internal scheduler time scale from task durations.
+  void updateScheduleTimeScale(const TaskMemoryGraph &graph);
+
+  // Returns the scaled duration used only for placement-time occupancy.
+  int getScheduleDuration(const TaskNode *task_node) const;
+
   // Returns true if a CGRA grid coordinate is inside the configured grid.
   bool posInBounds(const CgraPosition &pos) const;
 
@@ -168,6 +174,7 @@ private:
   int grid_cols_;
   SchedulingMode mode_;
   int total_task_count_ = 0;
+  int schedule_time_scale_ = 1;
   std::vector<std::vector<llvm::SmallVector<std::pair<int, int>, 4>>>
       cgra_occupancy_;
 };

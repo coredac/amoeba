@@ -14,6 +14,7 @@
 #include <cassert>
 #include <climits>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -535,6 +536,7 @@ bool TaskScheduler::schedule(func::FuncOp func,
   // grid area (grid_rows_ * grid_cols_) is much smaller than task_count
   // (e.g. 5 tasks on a 1x1 grid).
   total_task_count_ = static_cast<int>(sorted_tasks.size());
+  updateScheduleTimeScale(graph);
 
   for (int iter = 0; iter < kMaxIterations; ++iter) {
     if (iter > 0) {
@@ -550,10 +552,9 @@ bool TaskScheduler::schedule(func::FuncOp func,
 
       TaskPlacement placement = findBestPlacement(task_node, cgra_count, graph);
 
-      assert(!placement.cgra_positions.empty() &&
-             "findBestPlacement must succeed: cgra_count should be "
-             "validated by the upstream resource-aware optimization pass "
-             "or manually assigned resource binding attributes");
+      if (placement.cgra_positions.empty()) {
+        return false;
+      }
 
       for (const auto &pos : placement.cgra_positions) {
         task_node->placement.push_back(pos);
@@ -699,6 +700,31 @@ bool TaskScheduler::schedule(func::FuncOp func,
   return true;
 }
 
+void TaskScheduler::updateScheduleTimeScale(const TaskMemoryGraph &graph) {
+  // TaskScheduler only needs an internal time axis to decide whether two tasks
+  // overlap on the same CGRA during placement.  Real profiled latencies can be
+  // very large, so using them directly makes the temporal search horizon huge
+  // and can overflow integer arithmetic.  Scale only this internal occupancy
+  // duration; preserve the original profile_info.duration values for
+  // downstream consumers.
+  constexpr int64_t kMaxInternalDuration = 1000000;
+  int64_t max_duration = 1;
+  for (const auto &task_node : graph.task_nodes) {
+    max_duration =
+        std::max(max_duration, static_cast<int64_t>(task_node->getDuration()));
+  }
+  schedule_time_scale_ = static_cast<int>(std::max<int64_t>(
+      1, llvm::divideCeil(max_duration, kMaxInternalDuration)));
+}
+
+int TaskScheduler::getScheduleDuration(const TaskNode *task_node) const {
+  assert(schedule_time_scale_ > 0 &&
+         "Scheduler time scale must be positive.\n");
+  return std::max(1, static_cast<int>(llvm::divideCeil(
+                         static_cast<int64_t>(task_node->getDuration()),
+                         static_cast<int64_t>(schedule_time_scale_))));
+}
+
 bool TaskScheduler::posInBounds(const CgraPosition &pos) const {
   return pos.row >= 0 && pos.row < this->grid_rows_ && pos.col >= 0 &&
          pos.col < this->grid_cols_;
@@ -812,22 +838,27 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
     shapes_to_try = getAllPlacementShapes(cgra_count);
   }
 
-  int task_duration = task_node->getDuration();
+  int task_duration = getScheduleDuration(task_node);
 
-  int t_start = (mode_ == SchedulingMode::SpatialTemporal)
-                    ? computeEarliestStartTime(task_node)
-                    : 0;
+  int64_t t_start = (mode_ == SchedulingMode::SpatialTemporal)
+                        ? computeEarliestStartTime(task_node)
+                        : 0;
   // Time horizon: at minimum every task gets one sequential slot per cell.
   // grid_area is the number of CGRA cells in the multi-CGRA grid.
   // For large grids task_count << grid_area, grid_area is enough.
   // For small grids (e.g. 1x1 with 5 tasks) task_count dominates.
   int grid_area = grid_rows_ * grid_cols_;
   int max_time_slots = std::max(grid_area, total_task_count_);
-  int t_max = (mode_ == SchedulingMode::SpatialTemporal)
-                  ? t_start + max_time_slots * task_duration
-                  : 0;
+  int64_t t_max =
+      (mode_ == SchedulingMode::SpatialTemporal)
+          ? t_start + static_cast<int64_t>(max_time_slots) * task_duration
+          : 0;
 
-  for (int t = t_start; t <= t_max; t += task_duration) {
+  for (int64_t t = t_start; t <= t_max; t += task_duration) {
+    if (t > std::numeric_limits<int>::max() - task_duration) {
+      break;
+    }
+    int t_start_int = static_cast<int>(t);
     int best_score = INT_MIN;
     TaskPlacement best_at_t;
 
@@ -853,12 +884,12 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
             int abs_col = origin_col + col_off;
             if (abs_row < 0 || abs_row >= grid_rows_ || abs_col < 0 ||
                 abs_col >= grid_cols_ ||
-                isOccupied(abs_row, abs_col, t, task_duration)) {
+                isOccupied(abs_row, abs_col, t_start_int, task_duration)) {
               valid = false;
               break;
             }
             candidate.cgra_positions.push_back(
-                {abs_row, abs_col, t, task_duration, 0});
+                {abs_row, abs_col, t_start_int, task_duration, 0});
           }
           if (!valid) {
             continue;

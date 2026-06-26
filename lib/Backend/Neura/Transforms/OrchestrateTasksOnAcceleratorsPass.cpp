@@ -70,7 +70,12 @@ struct OrchestrateTasksOnAcceleratorsPass
       return;
     }
 
-    strategy->runTaskOrchestration(getOperation());
+    if (!strategy->runTaskOrchestration(getOperation())) {
+      getOperation()->emitError()
+          << "failed to orchestrate taskflow tasks with strategy: "
+          << orchestrationStrategy.getValue();
+      signalPassFailure();
+    }
   }
 };
 
