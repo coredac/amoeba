@@ -470,13 +470,13 @@ private:
 //
 // Uses a two-phase fixed-point iteration:
 //   Phase 1: Place tasks on the grid (scoring by SSA + memory proximity),
-//            processing tasks in priority order.
+//            processing tasks in dependency-ready priority order.
 //   Phase 2: Assign each MemRef to the nearest SRAM given task positions.
 // Iterates until SRAM assignments converge.
 //
 // In SpatialTemporal mode, ASAP scheduling is applied via
-// computeEarliestStartTime() so that each task starts as soon as all explicit
-// taskflow dependencies have completed.
+// computeEarliestStartTime() so that each ready task starts as soon as all
+// explicit taskflow dependencies have completed.
 TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode)
     : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {
   cgra_occupancy_.resize(grid_rows_);
@@ -505,25 +505,62 @@ bool TaskScheduler::schedule(func::FuncOp func,
     return true;
   }
 
-  // Sorts tasks by orchestration-provided priority. The scheduler does not
-  // infer a critical path; orchestration algorithms provide that policy.
-  SmallVector<TaskNode *> sorted_tasks;
-  for (auto &node : graph.task_nodes) {
-    sorted_tasks.push_back(node.get());
-  }
   auto getPriority = [&](TaskNode *node) {
     auto it = priority.find(node->op.getOperation());
     return it == priority.end() ? 0 : it->second;
   };
-  std::stable_sort(sorted_tasks.begin(), sorted_tasks.end(),
-                   [&](TaskNode *a, TaskNode *b) {
-                     int a_priority = getPriority(a);
-                     int b_priority = getPriority(b);
-                     if (a_priority != b_priority) {
-                       return a_priority > b_priority;
-                     }
-                     return a->id < b->id;
-                   });
+
+  // Build a dependency-respecting placement order. Orchestration algorithms
+  // still control priority, but priority is only used to choose among tasks
+  // whose explicit taskflow predecessors have already been placed.
+  SmallVector<int> remaining_predecessors(graph.task_nodes.size(), 0);
+  SmallVector<TaskNode *> ready_tasks;
+  for (auto &node : graph.task_nodes) {
+    remaining_predecessors[node->id] =
+        static_cast<int>(node->ssa_operands.size());
+    if (remaining_predecessors[node->id] == 0) {
+      ready_tasks.push_back(node.get());
+    }
+  }
+
+  auto isHigherPriority = [&](TaskNode *lhs, TaskNode *rhs) {
+    int lhs_priority = getPriority(lhs);
+    int rhs_priority = getPriority(rhs);
+    if (lhs_priority != rhs_priority) {
+      return lhs_priority > rhs_priority;
+    }
+    return lhs->id < rhs->id;
+  };
+
+  SmallVector<TaskNode *> sorted_tasks;
+  sorted_tasks.reserve(graph.task_nodes.size());
+  while (!ready_tasks.empty()) {
+    auto best_it = ready_tasks.begin();
+    for (auto it = ready_tasks.begin() + 1; it != ready_tasks.end(); ++it) {
+      if (isHigherPriority(*it, *best_it)) {
+        best_it = it;
+      }
+    }
+
+    TaskNode *task_node = *best_it;
+    ready_tasks.erase(best_it);
+    sorted_tasks.push_back(task_node);
+
+    for (TaskNode *user : task_node->ssa_users) {
+      int &remaining = remaining_predecessors[user->id];
+      assert(remaining > 0 &&
+             "Task dependency bookkeeping should not underflow.\n");
+      --remaining;
+      if (remaining == 0) {
+        ready_tasks.push_back(user);
+      }
+    }
+  }
+
+  if (sorted_tasks.size() != graph.task_nodes.size()) {
+    func.emitError() << "task dependencies form a cycle";
+    return false;
+  }
 
   // Fixed-point iteration: placement scoring depends on SRAM positions, and
   // SRAM assignment depends on task positions.  Converges when SRAMs are
