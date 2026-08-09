@@ -1,6 +1,6 @@
 // RUN: python3 %S/mlp_pipeline.py %t.linalg.mlir
 
-// RUN: neura-compiler %t.linalg.mlir \
+// RUN: mlir-amoeba-opt %t.linalg.mlir \
 // RUN:   --linalg-to-affine-conversion \
 // RUN:   -o %t.affine.mlir
 // RUN: FileCheck --input-file=%t.affine.mlir %s --check-prefix=AFFINE

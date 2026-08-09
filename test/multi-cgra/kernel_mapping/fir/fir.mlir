@@ -7,7 +7,7 @@
 // RUN: -o %t.hyperblock.mlir
 // RUN: FileCheck %s --input-file=%t.hyperblock.mlir --check-prefixes=HYPERBLOCK
 
-// RUN: neura-compiler %s --taskflow-conversion \
+// RUN: mlir-amoeba-opt %s --taskflow-conversion \
 // RUN: -o %t.kernel.mlir
 // RUN: FileCheck %s --input-file=%t.kernel.mlir --check-prefixes=KERNEL
 
@@ -69,7 +69,7 @@
 // RUN: --fold-constant \
 // RUN: --insert-data-mov \
 // RUN: --map-to-accelerator="mapping-strategy=heuristic" \
-// RUN: --architecture-spec=%S/../../../arch_spec/architecture_with_counter.yaml \
+// RUN: --architecture-spec=%S/../../../archspec/architecture_with_counter.yaml \
 // RUN: -o %t.mapped.mlir
 // RUN: FileCheck %s --input-file=%t.mapped.mlir --check-prefixes=MAPPED
 

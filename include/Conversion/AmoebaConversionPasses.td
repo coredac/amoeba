@@ -16,7 +16,7 @@ def ConvertAffineToTaskflow : Pass<"convert-affine-to-taskflow", "ModuleOp"> {
     taskflow.task operations within a taskflow.graph. Each top-level loop
     becomes a separate task, and data dependencies between tasks are made
     explicit through taskflow.channel operations.
-    
+
     The pass:
     1. Identifies all top-level affine.for operations
     2. Analyzes data dependencies (RAW, WAR, WAW) between loops
