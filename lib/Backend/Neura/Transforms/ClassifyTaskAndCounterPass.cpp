@@ -36,7 +36,7 @@
 
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "TaskflowDialect/TaskflowPasses.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -393,6 +393,6 @@ struct ClassifyTaskAndCounterPass
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::taskflow::createClassifyTaskAndCounterPass() {
+std::unique_ptr<Pass> mlir::amoeba::neura::createClassifyTaskAndCounterPass() {
   return std::make_unique<ClassifyTaskAndCounterPass>();
 }

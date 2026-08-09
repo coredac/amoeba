@@ -18,20 +18,6 @@
 using namespace mlir;
 using namespace mlir::bufferization;
 
-// This pass pipeline can convert affine dialect into taskflow dialect with
-// neura.kernel op.
-void mlir::taskflow::registerTaskflowConversionPassPipeline() {
-  PassPipelineRegistration<>(
-      "taskflow-conversion",
-      "Converts affine dialects to taskflow dialect with neura.kernel ops.",
-      [](OpPassManager &pm) {
-        pm.addPass(mlir::createConvertAffineToTaskflowPass());
-        pm.addPass(mlir::taskflow::createConstructHyperblockFromTaskPass());
-        pm.addPass(mlir::taskflow::createClassifyTaskAndCounterPass());
-        pm.addPass(mlir::createConvertTaskflowToNeuraPass());
-      });
-}
-
 // This pass pipeline converts TOSA dialect to Affine dialect with cleanup.
 void mlir::taskflow::registerTosaToAffineConversionPassPipeline() {
   PassPipelineRegistration<>(

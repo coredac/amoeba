@@ -13,8 +13,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "TaskflowDialect/TaskflowPasses.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "NeuraDialect/Architecture/Architecture.h"
 #include "NeuraDialect/Mapping/mapping_util.h"
@@ -1961,6 +1962,6 @@ struct ResourceAwareTaskOptimizationPass
 //===----------------------------------------------------------------------===//
 
 std::unique_ptr<mlir::Pass>
-mlir::taskflow::createResourceAwareTaskOptimizationPass() {
+mlir::amoeba::neura::createResourceAwareTaskOptimizationPass() {
   return std::make_unique<ResourceAwareTaskOptimizationPass>();
 }

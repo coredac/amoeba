@@ -15,7 +15,6 @@ namespace mlir {
 
 // Taskflow conversion passes.
 std::unique_ptr<mlir::Pass> createConvertAffineToTaskflowPass();
-std::unique_ptr<mlir::Pass> createConvertTaskflowToNeuraPass();
 
 // MemRef subview and copy conversion passes.
 std::unique_ptr<mlir::Pass> createFoldSubViewPass();

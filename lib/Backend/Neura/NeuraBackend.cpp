@@ -1,6 +1,7 @@
 //===- NeuraBackend.cpp - Neura backend integration ----------------------===//
 
 #include "Backend/Neura/NeuraBackend.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "Conversion/NeuraConversionPasses.h"
 #include "NeuraDialect/Architecture/Architecture.h"
@@ -58,4 +59,6 @@ void mlir::amoeba::registerNeuraBackend(DialectRegistry &registry) {
   registry.insert<mlir::neura::NeuraDialect>();
   mlir::neura::registerPasses();
   mlir::registerNeuraConversionPasses();
+  mlir::amoeba::neura::registerNeuraBackendPasses();
+  mlir::amoeba::neura::registerTaskflowConversionPassPipeline();
 }

@@ -8,9 +8,7 @@
 
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "TaskflowDialect/TaskflowPasses.h"
-
-#include "Conversion/AmoebaConversionPasses.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 #include "Conversion/NeuraConversionPasses.h"
 #include "NeuraDialect/Architecture/Architecture.h"
 #include "NeuraDialect/Mapping/mapping_util.h"
@@ -836,8 +834,8 @@ computeRealMetrics(ModuleOp test_module,
   // Phase 1: converts taskflow ops to neura kernels.
   {
     PassManager pm(cloned.getContext());
-    pm.addPass(taskflow::createClassifyTaskAndCounterPass());
-    pm.addPass(createConvertTaskflowToNeuraPass());
+    pm.addPass(amoeba::neura::createClassifyTaskAndCounterPass());
+    pm.addPass(amoeba::neura::createConvertTaskflowToNeuraPass());
     pm.enableVerifier(false);
     if (failed(pm.run(cloned))) {
       metrics.rec_mii = 100;
@@ -1323,8 +1321,8 @@ struct FuseTaskPass
 
 } // namespace
 
-namespace mlir::taskflow {
+namespace mlir::amoeba::neura {
 std::unique_ptr<Pass> createFuseTaskPass() {
   return std::make_unique<FuseTaskPass>();
 }
-} // namespace mlir::taskflow
+} // namespace mlir::amoeba::neura

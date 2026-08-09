@@ -1,8 +1,8 @@
 // Implements the routing-critical-path orchestration strategy as a thin
 // wrapper around the reusable TaskScheduler backend.
 
-#include "TaskflowDialect/Orchestration/RoutingCriticalPathOrchestration/RoutingCriticalPathOrchestration.h"
-#include "TaskflowDialect/Orchestration/orchestration_utils.h"
+#include "Backend/Neura/Orchestration/RoutingCriticalPathOrchestration/RoutingCriticalPathOrchestration.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"

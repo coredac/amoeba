@@ -1,8 +1,8 @@
 // Orchestrate Taskflow tasks onto a multi-CGRA grid.
 
 #include "NeuraDialect/Architecture/Architecture.h"
-#include "TaskflowDialect/Orchestration/RoutingCriticalPathOrchestration/RoutingCriticalPathOrchestration.h"
-#include "TaskflowDialect/TaskflowPasses.h"
+#include "Backend/Neura/Orchestration/RoutingCriticalPathOrchestration/RoutingCriticalPathOrchestration.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
 
@@ -52,12 +52,10 @@ struct OrchestrateTasksOnAcceleratorsPass
 
 } // namespace
 
-namespace mlir {
-namespace taskflow {
+namespace mlir::amoeba::neura {
 
 std::unique_ptr<Pass> createOrchestrateTasksOnAcceleratorsPass() {
   return std::make_unique<OrchestrateTasksOnAcceleratorsPass>();
 }
 
-} // namespace taskflow
-} // namespace mlir
+} // namespace mlir::amoeba::neura

@@ -59,7 +59,6 @@ int main(int argc, char **argv) {
   mlir::registerViewOpGraphPass();
   mlir::taskflow::registerPasses();
   mlir::taskflow::registerTosaToAffineConversionPassPipeline();
-  mlir::taskflow::registerTaskflowConversionPassPipeline();
   mlir::taskflow::registerLinalgToAffineConversionPassPipeline();
 
   // Register all standard conversion passes

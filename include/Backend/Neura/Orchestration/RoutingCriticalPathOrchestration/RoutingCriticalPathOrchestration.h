@@ -3,8 +3,8 @@
 #ifndef TASKFLOW_ROUTING_CRITICAL_PATH_ORCHESTRATION_H
 #define TASKFLOW_ROUTING_CRITICAL_PATH_ORCHESTRATION_H
 
-#include "TaskflowDialect/Orchestration/Orchestration.h"
-#include "TaskflowDialect/Orchestration/orchestration_utils.h"
+#include "Backend/Neura/Orchestration/Orchestration.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
 
 namespace mlir {
 namespace taskflow {

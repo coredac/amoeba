@@ -3,7 +3,6 @@
 #ifndef TASKFLOW_PASSES_H
 #define TASKFLOW_PASSES_H
 
-#include "TaskflowDialect/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -15,17 +14,12 @@
 namespace mlir {
 namespace taskflow {
 
-void registerTaskflowConversionPassPipeline();
 void registerTosaToAffineConversionPassPipeline();
 void registerLinalgToAffineConversionPassPipeline();
 
 // Passes defined in TaskflowPasses.td
 #define GEN_PASS_DECL
 #include "TaskflowDialect/TaskflowPasses.h.inc"
-std::unique_ptr<mlir::Pass> createConstructHyperblockFromTaskPass();
-std::unique_ptr<mlir::Pass> createClassifyTaskAndCounterPass();
-std::unique_ptr<mlir::Pass> createOrchestrateTasksOnAcceleratorsPass();
-std::unique_ptr<mlir::Pass> createFuseTaskPass();
 
 //=========================================================//
 // Optimization Passes
@@ -33,7 +27,6 @@ std::unique_ptr<mlir::Pass> createFuseTaskPass();
 std::unique_ptr<mlir::Pass> createAffineLoopTreeSerializationPass();
 std::unique_ptr<mlir::Pass> createAffineLoopPerfectionPass();
 std::unique_ptr<mlir::Pass> createMemoryAccessStreamingFusionPass();
-std::unique_ptr<mlir::Pass> createResourceAwareTaskOptimizationPass();
 
 #define GEN_PASS_REGISTRATION
 #include "TaskflowDialect/TaskflowPasses.h.inc"

@@ -3,7 +3,7 @@
 #include "NeuraDialect/NeuraOps.h"
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "TaskflowDialect/TaskflowPasses.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -653,6 +653,6 @@ struct ConstructHyperblockFromTaskPass
 };
 } // namespace
 
-std::unique_ptr<Pass> mlir::taskflow::createConstructHyperblockFromTaskPass() {
+std::unique_ptr<Pass> mlir::amoeba::neura::createConstructHyperblockFromTaskPass() {
   return std::make_unique<ConstructHyperblockFromTaskPass>();
 }

@@ -1,15 +1,10 @@
+add_subdirectory(Neura)
+
 add_mlir_library(MLIRAmoebaBackends
   Backends.cpp
-  Neura/NeuraBackend.cpp
 
   LINK_LIBS PUBLIC
-  MLIRNeura
-  MLIRNeuraTransforms
-  MLIRNeuraHwAgnosticOpt
-  MLIRNeuraHwSpecificOpt
-  MLIRNeuraConversion
+  MLIRAmoebaNeuraBackend
   MLIRIR
-  MLIRPass
   MLIRSupport
-  LLVMSupport
 )

@@ -1,6 +1,6 @@
 // Shared CGRA orchestration utilities.
 
-#include "TaskflowDialect/Orchestration/orchestration_utils.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/ArrayRef.h"

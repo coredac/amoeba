@@ -1,3 +1,3 @@
 add_subdirectory(Conversion)
-add_subdirectory(Backend)
 add_subdirectory(TaskflowDialect)
+add_subdirectory(Backend)

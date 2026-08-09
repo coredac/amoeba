@@ -1,4 +1,4 @@
-#include "Conversion/AmoebaConversionPasses.h"
+#include "Backend/Neura/NeuraBackendPasses.h"
 #include "NeuraDialect/NeuraDialect.h"
 #include "NeuraDialect/NeuraOps.h"
 #include "TaskflowDialect/TaskflowDialect.h"
@@ -465,6 +465,6 @@ struct ConvertTaskflowToNeuraPass
 };
 } // namespace
 
-std::unique_ptr<Pass> mlir::createConvertTaskflowToNeuraPass() {
+std::unique_ptr<Pass> mlir::amoeba::neura::createConvertTaskflowToNeuraPass() {
   return std::make_unique<ConvertTaskflowToNeuraPass>();
 }

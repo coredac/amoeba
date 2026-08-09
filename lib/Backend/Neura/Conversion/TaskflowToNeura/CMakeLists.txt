@@ -1,15 +1,14 @@
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
-add_mlir_library(MLIRTaskflowTransforms
-  AffineLoopTreeSerializationPass.cpp
-  AffineLoopPerfectionPass.cpp
-  MemoryAccessStreamingFusion.cpp
+add_mlir_conversion_library(MLIRAmoebaTaskflowToNeura
+  TaskflowToNeuraPass.cpp
 
   DEPENDS
-  MLIRTaskflowTransformsIncGen
+  MLIRAmoebaNeuraBackendPassesIncGen
 
   LINK_LIBS PUBLIC
   MLIRTaskflow
+  MLIRNeura
   MLIRIR
   MLIRPass
   MLIRSupport

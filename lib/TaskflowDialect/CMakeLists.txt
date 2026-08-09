@@ -6,12 +6,11 @@ add_mlir_dialect_library(MLIRTaskflow
         DEPENDS
         MLIRAmoebaConversionIncGen
         MLIRTaskflowTransformsIncGen
-        
+
         LINK_LIBS PUBLIC
         MLIRIR
         MLIRSupport
         MLIRInferTypeOpInterface
 )
 
-add_subdirectory(Orchestration)
 add_subdirectory(Transforms)
