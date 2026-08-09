@@ -1,4 +1,4 @@
-// RUN: mlir-neura-opt --convert-affine-to-taskflow %s \
+// RUN: mlir-amoeba-opt --convert-affine-to-taskflow %s \
 // RUN: -o %t-taskflow.mlir
 // RUN: FileCheck %s --input-file=%t-taskflow.mlir
 

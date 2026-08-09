@@ -19,8 +19,9 @@ add_mlir_conversion_library(MLIRTaskflowOptimization
   MLIRIR
   MLIRPass
   MLIRTransforms
+  MLIRAmoebaConversion
   MLIRNeura
   MLIRNeuraTransforms
-  MLIRConversion
+  MLIRNeuraConversion
   MLIRSupport
 )

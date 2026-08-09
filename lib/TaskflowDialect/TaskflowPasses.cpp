@@ -1,5 +1,5 @@
 #include "TaskflowDialect/TaskflowPasses.h"
-#include "Conversion/ConversionPasses.h"
+#include "Conversion/AmoebaConversionPasses.h"
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/Conversion/Passes.h"

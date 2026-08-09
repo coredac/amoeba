@@ -5,12 +5,12 @@
 // RUN:   -o %t.affine.mlir
 // RUN: FileCheck --input-file=%t.affine.mlir %s --check-prefix=AFFINE
 
-// RUN: mlir-neura-opt %t.affine.mlir \
+// RUN: mlir-amoeba-opt %t.affine.mlir \
 // RUN:   --convert-affine-to-taskflow \
 // RUN:   -o %t.taskflow.mlir
 // RUN: FileCheck --input-file=%t.taskflow.mlir %s --check-prefix=TASKFLOW
 
-// RUN: mlir-neura-opt %t.taskflow.mlir \
+// RUN: mlir-amoeba-opt %t.taskflow.mlir \
 // RUN:   --construct-hyperblock-from-task \
 // RUN:   --cse \
 // RUN:   --classify-task-and-counter \

@@ -10,7 +10,8 @@
 #include "TaskflowDialect/TaskflowOps.h"
 #include "TaskflowDialect/TaskflowPasses.h"
 
-#include "Conversion/ConversionPasses.h"
+#include "Conversion/AmoebaConversionPasses.h"
+#include "Conversion/NeuraConversionPasses.h"
 #include "NeuraDialect/Architecture/Architecture.h"
 #include "NeuraDialect/Mapping/mapping_util.h"
 #include "NeuraDialect/NeuraOps.h"

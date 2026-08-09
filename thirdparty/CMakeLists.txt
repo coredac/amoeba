@@ -1,0 +1,1 @@
+add_subdirectory(neura EXCLUDE_FROM_ALL)

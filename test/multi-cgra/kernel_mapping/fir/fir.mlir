@@ -1,8 +1,8 @@
-// RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
+// RUN: mlir-amoeba-opt %s --convert-affine-to-taskflow \
 // RUN: -o %t.taskflow.mlir
 // RUN: FileCheck %s --input-file=%t.taskflow.mlir --check-prefixes=TASKFLOW
 
-// RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
+// RUN: mlir-amoeba-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: -o %t.hyperblock.mlir
 // RUN: FileCheck %s --input-file=%t.hyperblock.mlir --check-prefixes=HYPERBLOCK
@@ -11,7 +11,7 @@
 // RUN: -o %t.kernel.mlir
 // RUN: FileCheck %s --input-file=%t.kernel.mlir --check-prefixes=KERNEL
 
-// RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
+// RUN: mlir-amoeba-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: --classify-task-and-counter \
 // RUN: --convert-taskflow-to-neura \
@@ -26,7 +26,7 @@
 // RUN: -o %t.neura.mlir
 // RUN: FileCheck %s --input-file=%t.neura.mlir --check-prefixes=NEURA
 
-// RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
+// RUN: mlir-amoeba-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: --classify-task-and-counter \
 // RUN: --convert-taskflow-to-neura \
@@ -48,7 +48,7 @@
 // RUN: -o %t.dataflow.mlir
 // RUN: FileCheck %s --input-file=%t.dataflow.mlir --check-prefixes=DATAFLOW
 
-// RUN: mlir-neura-opt %s --convert-affine-to-taskflow \
+// RUN: mlir-amoeba-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: --classify-task-and-counter \
 // RUN: --convert-taskflow-to-neura \

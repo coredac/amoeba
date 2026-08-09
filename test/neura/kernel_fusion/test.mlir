@@ -1,4 +1,4 @@
-// RUN: mlir-neura-opt %s \
+// RUN: mlir-amoeba-opt %s \
 // RUN:   --affine-loop-tree-serialization \
 // RUN:   --convert-affine-to-taskflow \
 // RUN:   --construct-hyperblock-from-task \

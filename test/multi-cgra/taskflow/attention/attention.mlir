@@ -1,4 +1,4 @@
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --affine-loop-perfection \
 // RUN: -o %t.perfect.mlir
 // RUN: FileCheck %s --input-file=%t.perfect.mlir --check-prefixes=PERFECT

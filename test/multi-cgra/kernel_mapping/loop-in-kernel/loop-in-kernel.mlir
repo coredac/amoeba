@@ -1,4 +1,4 @@
-// RUN: mlir-neura-opt %s \
+// RUN: mlir-amoeba-opt %s \
 // RUN: --lower-affine \
 // RUN: --convert-scf-to-cf \
 // RUN: --convert-cf-to-llvm \
@@ -10,7 +10,7 @@
 // RUN: -o %t.neura.mlir
 // RUN: FileCheck %s --input-file=%t.neura.mlir --check-prefixes=NEURA
 
-// RUN: mlir-neura-opt %s \
+// RUN: mlir-amoeba-opt %s \
 // RUN: --lower-affine \
 // RUN: --convert-scf-to-cf \
 // RUN: --convert-cf-to-llvm \
@@ -29,7 +29,7 @@
 // RUN: -o %t.dataflow.mlir
 // RUN: FileCheck %s --input-file=%t.dataflow.mlir --check-prefixes=DATAFLOW
 
-// RUN: mlir-neura-opt %s \
+// RUN: mlir-amoeba-opt %s \
 // RUN: --lower-affine \
 // RUN: --convert-scf-to-cf \
 // RUN: --convert-cf-to-llvm \

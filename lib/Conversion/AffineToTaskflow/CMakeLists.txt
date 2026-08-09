@@ -6,7 +6,7 @@ add_mlir_conversion_library(MLIRAffineToTaskflowPass
   ConvertCopyToAffineLoopsPass.cpp
 
   DEPENDS
-  MLIRConversionIncGen
+  MLIRAmoebaConversionIncGen
 
   LINK_LIBS PUBLIC
   MLIRTaskflow

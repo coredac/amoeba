@@ -7,7 +7,7 @@
 // RUN: -o %t.kernel.mlir
 // RUN: FileCheck %s --input-file=%t.kernel.mlir --check-prefixes=KERNEL
 
-// RUN: mlir-neura-opt %t.affine.mlir \
+// RUN: mlir-amoeba-opt %t.affine.mlir \
 // RUN: --affine-loop-tree-serialization \
 // RUN: --affine-loop-perfection \
 // RUN: --convert-affine-to-taskflow \
@@ -15,7 +15,7 @@
 // RUN: -o %t.stream.mlir
 // RUN: FileCheck %s --input-file=%t.stream.mlir --check-prefixes=STREAM
 
-// RUN: mlir-neura-opt %t.affine.mlir --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %t.affine.mlir --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -23,7 +23,7 @@
 // RUN: -o %t.map_4x4_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_4x4_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-4x4
 
-// RUN: mlir-neura-opt %t.affine.mlir --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %t.affine.mlir --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -31,7 +31,7 @@
 // RUN: -o %t.map_1x1_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_1x1_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-1x1
 
-// RUN: mlir-neura-opt %t.affine.mlir --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %t.affine.mlir --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -39,7 +39,7 @@
 // RUN: -o %t.map_1x2_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_1x2_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-1x2
 
-// RUN: mlir-neura-opt %t.stream.mlir \
+// RUN: mlir-amoeba-opt %t.stream.mlir \
 // RUN: --affine-loop-tree-serialization \
 // RUN: --affine-loop-perfection \
 // RUN: --construct-hyperblock-from-task \

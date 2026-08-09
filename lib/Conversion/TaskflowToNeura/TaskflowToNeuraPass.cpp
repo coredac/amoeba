@@ -1,5 +1,4 @@
-#include "Common/AcceleratorAttrs.h"
-#include "Conversion/ConversionPasses.h"
+#include "Conversion/AmoebaConversionPasses.h"
 #include "NeuraDialect/NeuraDialect.h"
 #include "NeuraDialect/NeuraOps.h"
 #include "TaskflowDialect/TaskflowDialect.h"

@@ -3,10 +3,10 @@
 // Build workflow using Polygeist:
 //   1. cgeist kernel.cpp -S -O2                          -> SCF loops
 //   2. polygeist-opt --raise-scf-to-affine                -> Affine loops
-//   3. mlir-neura-opt --affine-loop-tree-serialization \
+//   3. mlir-amoeba-opt --affine-loop-tree-serialization \
 //        --convert-affine-to-taskflow \
 //        --construct-hyperblock-from-task                  -> taskflow.task ops
-//   4. mlir-neura-opt --fuse-task                         -> Fused tasks
+//   4. mlir-amoeba-opt --fuse-task                         -> Fused tasks
 
 #define N 64
 

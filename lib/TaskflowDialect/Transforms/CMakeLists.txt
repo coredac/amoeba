@@ -16,9 +16,10 @@ add_mlir_library(MLIRTaskflowTransforms
     MLIRTransforms
     MLIRTaskflow
     MLIRTaskflowOrchestration
+    MLIRAmoebaConversion
     MLIRNeura
     MLIRNeuraTransforms
-    MLIRConversion
+    MLIRNeuraConversion
     ${dialect_libs}
     LLVMSupport
 )

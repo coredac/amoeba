@@ -1,0 +1,3 @@
+[submodule "thirdparty/neura"]
+	path = thirdparty/neura
+	url = git@github.com:coredac/neura.git

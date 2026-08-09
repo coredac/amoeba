@@ -4,7 +4,7 @@ add_mlir_dialect_library(MLIRTaskflow
         TaskflowOps.cpp
 
         DEPENDS
-        MLIRConversionIncGen
+        MLIRAmoebaConversionIncGen
         MLIRTaskflowTransformsIncGen
         
         LINK_LIBS PUBLIC

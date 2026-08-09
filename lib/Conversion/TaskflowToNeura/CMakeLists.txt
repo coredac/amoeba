@@ -4,16 +4,16 @@ add_mlir_conversion_library(MLIRTaskflowToNeuraPass
   TaskflowToNeuraPass.cpp
 
   DEPENDS
-  MLIRConversionIncGen
+  MLIRAmoebaConversionIncGen
 
   LINK_LIBS PUBLIC
   MLIRArithDialect
   MLIRFuncDialect
   MLIRLLVMDialect
   MLIRTaskflow
+  MLIRNeura
   MLIRIR
   MLIRPass
   MLIRTransforms
-  MLIRNeura
   MLIRSupport
 )

@@ -1,13 +1,13 @@
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: -o %t.serialized.mlir
 // RUN: FileCheck %s --input-file=%t.serialized.mlir --check-prefixes=SERIALIZED
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: -o %t.taskflow.mlir
 // RUN: FileCheck %s --input-file=%t.taskflow.mlir --check-prefixes=TASKFLOW
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --affine-loop-perfection \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
@@ -33,14 +33,14 @@
 // RUN: -o %t.resopt.mlir
 // RUN: FileCheck %s --input-file=%t.resopt.mlir --check-prefixes=RESOPT
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: -o %t.hyperblock.mlir
 // RUN: FileCheck %s --input-file=%t.hyperblock.mlir --check-prefixes=HYPERBLOCK
 
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -50,7 +50,7 @@
 
 // SMALL-GRID-1x1: Tests spatial-temporal mapping on a 1x1 CGRA grid.
 // SMALL-GRID-1x1: With only 1 CGRA, 2 tasks must time-multiplex.
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -60,7 +60,7 @@
 
 // SMALL-GRID-1x2: Tests spatial-temporal mapping on a 1x2 CGRA grid.
 // SMALL-GRID-1x2: 2 CGRAs for 2 tasks — fits spatially but still exercises small grid.
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -68,7 +68,7 @@
 // RUN: -o %t.map_1x2_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_1x2_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-1x2
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial' \

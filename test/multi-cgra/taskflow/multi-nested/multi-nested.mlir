@@ -1,24 +1,24 @@
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: -o %t.serialized.mlir
 // RUN: FileCheck %s --input-file=%t.serialized.mlir --check-prefixes=SERIALIZED
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --affine-loop-perfection \
 // RUN: -o %t.perfect.mlir
 // RUN: FileCheck %s --input-file=%t.perfect.mlir --check-prefixes=PERFECT
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: -o %t.taskflow.mlir
 // RUN: FileCheck %s --input-file=%t.taskflow.mlir --check-prefixes=TASKFLOW
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --memory-access-streaming-fusion \
 // RUN: -o %t.stream.mlir
 // RUN: FileCheck %s --input-file=%t.stream.mlir --check-prefixes=STREAM
 
-// RUN: mlir-neura-opt %t.stream.mlir \
+// RUN: mlir-amoeba-opt %t.stream.mlir \
 // RUN: --affine-loop-tree-serialization \
 // RUN: --affine-loop-perfection \
 // RUN: --construct-hyperblock-from-task \
@@ -44,7 +44,7 @@
 // RUN: -o %t.resopt.mlir
 // RUN: FileCheck %s --input-file=%t.resopt.mlir --check-prefixes=RESOPT
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: --convert-taskflow-to-neura \
@@ -52,14 +52,14 @@
 // RUN: -o %t.kernel.mlir
 // RUN: FileCheck %s --input-file=%t.kernel.mlir --check-prefixes=KERNEL
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: -o %t.hyperblock.mlir
 // RUN: FileCheck %s --input-file=%t.hyperblock.mlir --check-prefixes=HYPERBLOCK
 
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -69,7 +69,7 @@
 
 // SMALL-GRID-1x1: Tests spatial-temporal mapping on a 1x1 CGRA grid.
 // SMALL-GRID-1x1: 5 tasks must time-multiplex on the single CGRA.
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -79,7 +79,7 @@
 
 // SMALL-GRID-1x2: Tests spatial-temporal mapping on a 1x2 CGRA grid.
 // SMALL-GRID-1x2: 2 CGRAs for 5 tasks — multiple temporal reuse slots.
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
@@ -87,7 +87,7 @@
 // RUN: -o %t.map_1x2_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_1x2_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-1x2
 
-// RUN: mlir-neura-opt %s --affine-loop-tree-serialization \
+// RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial' \
