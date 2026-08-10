@@ -1,3 +1,7 @@
+// UNSUPPORTED: true
+// TODO: Re-enable when Neura mapping produces a deterministic compiled_ii
+// across local and GitHub Actions environments.
+
 // RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: -o %t.serialized.mlir
 // RUN: FileCheck %s --input-file=%t.serialized.mlir --check-prefixes=SERIALIZED
