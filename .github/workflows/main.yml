@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+  LLVM_COMMIT: 6146a88f60492b520a36f8f8f3231e15f3cc6082
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_COMPRESS: "true"
+  CCACHE_MAXSIZE: 4G
+  TORCH_MLIR_WHEEL_URL: https://github.com/ShangkunLi/python-wheels/releases/download/v1.0/torch_mlir-20251210.657-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Amoeba and Neura
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Verify Neura submodule
+        run: |
+          git submodule status
+          test "$(git -C thirdparty/neura rev-parse HEAD)" = "$(git rev-parse HEAD:thirdparty/neura)"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ccache clang lld ninja-build
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-ccache-${{ env.LLVM_COMMIT }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ env.LLVM_COMMIT }}-
+
+      - name: Restore LLVM build
+        id: llvm-cache
+        uses: actions/cache@v6
+        with:
+          path: llvm-project
+          key: ${{ runner.os }}-llvm-${{ env.LLVM_COMMIT }}-${{ env.BUILD_TYPE }}-v1
+
+      - name: Build LLVM and MLIR
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          git init llvm-project
+          git -C llvm-project remote add origin https://github.com/llvm/llvm-project.git
+          git -C llvm-project fetch --depth=1 --filter=blob:none origin "${LLVM_COMMIT}"
+          git -C llvm-project checkout --detach FETCH_HEAD
+
+          cmake -G Ninja \
+            -S llvm-project/llvm \
+            -B llvm-project/build \
+            -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+            -DLLVM_BUILD_EXAMPLES=OFF \
+            -DLLVM_TARGETS_TO_BUILD=Native \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_CXX_FLAGS="-std=c++17 -frtti" \
+            -DLLVM_ENABLE_LLD=ON \
+            -DMLIR_INSTALL_AGGREGATE_OBJECTS=ON \
+            -DLLVM_ENABLE_RTTI=ON \
+            -DLLVM_CCACHE_BUILD=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+          cmake --build llvm-project/build --parallel 2
+
+      - name: Verify LLVM build
+        run: |
+          test -f llvm-project/build/lib/cmake/llvm/LLVMConfig.cmake
+          test -f llvm-project/build/lib/cmake/mlir/MLIRConfig.cmake
+          test -x llvm-project/build/bin/llvm-lit
+
+      - name: Configure Amoeba
+        run: |
+          cmake -G Ninja \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DLLVM_DIR="${GITHUB_WORKSPACE}/llvm-project/build/lib/cmake/llvm" \
+            -DMLIR_DIR="${GITHUB_WORKSPACE}/llvm-project/build/lib/cmake/mlir" \
+            -DMLIR_SOURCE_DIR="${GITHUB_WORKSPACE}/llvm-project/mlir" \
+            -DMLIR_BINARY_DIR="${GITHUB_WORKSPACE}/llvm-project/build"
+
+      - name: Build Amoeba
+        run: cmake --build build --parallel 2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.11.13
+
+      - name: Restore Python package cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-python-3.11.13-torch-2.5.1-torch-mlir-20251210.657
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "${TORCH_MLIR_WHEEL_URL}"
+
+      - name: Run Amoeba tests
+        run: cmake --build build --target check-amoeba
+
+      - name: Show ccache statistics
+        if: always()
+        run: ccache --show-stats
