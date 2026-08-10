@@ -27,7 +27,7 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
       - name: Checkout Amoeba and Neura
@@ -46,7 +46,8 @@ jobs:
           sudo apt-get install --yes ccache clang lld ninja-build
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        id: ccache
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ runner.os }}-ccache-${{ env.LLVM_COMMIT }}-${{ github.sha }}
@@ -55,7 +56,7 @@ jobs:
 
       - name: Restore LLVM build
         id: llvm-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: llvm-project
           key: ${{ runner.os }}-llvm-${{ env.LLVM_COMMIT }}-${{ env.BUILD_TYPE }}-v1
@@ -96,6 +97,13 @@ jobs:
           test -f llvm-project/build/lib/cmake/mlir/MLIRConfig.cmake
           test -x llvm-project/build/bin/llvm-lit
 
+      - name: Save LLVM build
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: llvm-project
+          key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
+
       - name: Configure Amoeba
         run: |
           cmake -G Ninja \
@@ -109,6 +117,13 @@ jobs:
 
       - name: Build Amoeba
         run: cmake --build build --parallel 2
+
+      - name: Save ccache
+        if: steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
