@@ -1,0 +1,17 @@
+import os
+import lit.formats
+
+config.name = 'Amoeba Dialect Tests'
+config.test_format = lit.formats.ShTest(True)
+config.suffixes = ['.mlir']
+config.test_source_root = r'@CMAKE_SOURCE_DIR@/test'
+config.test_exec_root = r'@CMAKE_BINARY_DIR@/test'
+config.excludes = ['samples', 'benchmark']
+
+# Tool substitutions from CMake
+config.substitutions.append(('mlir-amoeba-opt', '@MLIR_AMOEBA_OPT@'))
+config.substitutions.append(('FileCheck', '@FILECHECK@'))
+config.substitutions.append(('mlir-opt', '@MLIR_OPT@'))
+config.substitutions.append(('mlir-translate', '@MLIR_TRANSLATE@'))
+config.substitutions.append(('llc', '@LLC@'))
+config.substitutions.append(('clang', '@CLANG@'))
