@@ -42,13 +42,17 @@ backend.
 ```text
 amoeba/
 |-- include/
+|   |-- Taskflow-C/            # Public Taskflow C API used by Python bindings
 |   |-- TaskflowDialect/       # Taskflow dialect and pass interfaces
 |   |-- Conversion/            # Backend-independent conversion interfaces
 |   `-- Backend/               # Public backend integration interfaces
 |-- lib/
+|   |-- CAPI/                  # Taskflow C API implementation
 |   |-- TaskflowDialect/       # Taskflow implementation and generic passes
 |   |-- Conversion/            # Backend-independent conversions
 |   `-- Backend/               # Backend adapter implementations
+|-- python/
+|   `-- dialects/              # Unified Taskflow and Neura Python package
 |-- thirdparty/
 |   `-- neura/                 # Neura Git submodule
 |-- tools/
@@ -63,10 +67,18 @@ Amoeba requires:
 - a C++17 compiler, with `clang` and `clang++` used by the reference build;
 - CMake, Ninja, and Make;
 - `ccache` and `lld` for the reference LLVM build;
+- Python 3.11;
 - LLVM/MLIR at commit
   [`6146a88f60492b520a36f8f8f3231e15f3cc6082`](https://github.com/llvm/llvm-project/commit/6146a88f60492b520a36f8f8f3231e15f3cc6082);
   and
 - Git submodule support.
+
+Install the Python build dependencies into the same environment used to
+configure LLVM and Amoeba:
+
+```bash
+python -m pip install pybind11==2.13.6 nanobind==2.15.0
+```
 
 This is the same LLVM revision used by the current
 [Neura build instructions](https://github.com/coredac/neura#build-llvm--neura)
@@ -111,6 +123,10 @@ cmake -G Ninja ../llvm \
   -DLLVM_ENABLE_LLD=ON \
   -DMLIR_INSTALL_AGGREGATE_OBJECTS=ON \
   -DLLVM_ENABLE_RTTI=ON \
+  -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+  -DMLIR_BINDINGS_PYTHON_NB_DOMAIN=mlir \
+  -DPython3_EXECUTABLE="$(which python)" \
+  -DPython_EXECUTABLE="$(which python)" \
   -DLLVM_CCACHE_BUILD=ON \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -127,25 +143,27 @@ cmake --build . --target check-clang
 
 ## Build Amoeba
 
-From the Amoeba repository root, create a separate build directory and point
-CMake to the LLVM/MLIR build above:
+From the Amoeba repository root, set `LLVM_BUILD_DIR` to the LLVM build above.
+Amoeba derives the LLVM source and CMake package paths from this directory:
 
 ```bash
-mkdir build && cd build
+export LLVM_BUILD_DIR=/path/to/llvm-project/build
 
-cmake .. \
+cmake -G Ninja -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
-  -DLLVM_DIR=/path/to/llvm-project/build/lib/cmake/llvm \
-  -DMLIR_DIR=/path/to/llvm-project/build/lib/cmake/mlir \
-  -DMLIR_SOURCE_DIR=/path/to/llvm-project/mlir \
-  -DMLIR_BINARY_DIR=/path/to/llvm-project/build
+  -DPython3_EXECUTABLE="$(which python)" \
+  -DPython_EXECUTABLE="$(which python)"
 
-make
+cmake --build build --parallel 2
+cmake --build build --target AmoebaPythonModules --parallel 2
 ```
 
-The Neura submodule is added with `EXCLUDE_FROM_ALL`. CMake therefore builds
-the Neura targets required by Amoeba without treating the standalone Neura
-tools as part of the default Amoeba build.
+Amoeba assembles Taskflow and Neura into one MLIR Python package at
+`build/python_packages/amoeba_core/taskflow_mlir`. Both dialects therefore share
+the same Python `Context`, `Type`, and native MLIR runtime.
+
+The Neura submodule remains `EXCLUDE_FROM_ALL`: Amoeba reuses the Neura
+libraries and Python sources it needs without building standalone Neura tools.
 
 ## Command-line tool
 
@@ -171,15 +189,19 @@ and `--neura-latency-spec`.
 
 ## Tests
 
-After building Amoeba, run the complete lit suite from `amoeba/build`:
+After building Amoeba, run the focused Python binding test:
 
 ```bash
-cd test
-llvm-lit . -v
+$LLVM_BUILD_DIR/bin/llvm-lit -v \
+  --filter='taskflow_neura_binding.py' test
 ```
 
-If `llvm-lit` is not on `PATH`, invoke it with the full path instead, for
-example `/path/to/llvm-project/build/bin/llvm-lit . -v`.
+Run the complete suite through the CMake target:
 
-The suite covers Taskflow conversions and transformations, end-to-end lowering,
-and integration with the Neura backend.
+```bash
+cmake --build build --target check-amoeba
+```
+
+The suite covers Taskflow conversions and transformations, the unified
+Taskflow/Neura Python package, end-to-end lowering, and Neura backend
+integration.
