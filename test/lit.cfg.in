@@ -3,9 +3,9 @@ import lit.formats
 
 config.name = 'Amoeba Dialect Tests'
 config.test_format = lit.formats.ShTest(True)
-config.suffixes = ['.mlir']
-config.test_source_root = r'@CMAKE_SOURCE_DIR@/test'
-config.test_exec_root = r'@CMAKE_BINARY_DIR@/test'
+config.suffixes = ['.mlir', '.py']
+config.test_source_root = os.path.dirname(__file__)
+config.test_exec_root = os.path.dirname(__file__)
 config.excludes = ['samples', 'benchmark']
 
 # Tool substitutions from CMake
@@ -15,3 +15,14 @@ config.substitutions.append(('mlir-opt', '@MLIR_OPT@'))
 config.substitutions.append(('mlir-translate', '@MLIR_TRANSLATE@'))
 config.substitutions.append(('llc', '@LLC@'))
 config.substitutions.append(('clang', '@CLANG@'))
+config.substitutions.append(("%python", "@Python3_EXECUTABLE@"))
+
+python_package_root = r"@AMOEBA_PYTHON_PACKAGE_ROOT@"
+current_python_path = config.environment.get("PYTHONPATH")
+
+if current_python_path:
+    config.environment["PYTHONPATH"] = os.pathsep.join(
+        [python_package_root, current_python_path]
+    )
+else:
+    config.environment["PYTHONPATH"] = python_package_root
