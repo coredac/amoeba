@@ -1,0 +1,6 @@
+#ifndef TASKFLOW_PYTHON_BINDINGS_OPS
+#define TASKFLOW_PYTHON_BINDINGS_OPS
+
+include "TaskflowDialect/TaskflowOps.td"
+
+#endif // TASKFLOW_PYTHON_BINDINGS_OPS
