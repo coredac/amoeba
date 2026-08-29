@@ -13,9 +13,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Backend/Neura/NeuraBackendPasses.h"
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "NeuraDialect/Architecture/Architecture.h"
 #include "NeuraDialect/Mapping/mapping_util.h"
@@ -1403,13 +1403,19 @@ private:
     auto fused_kernel = fused_kb.create<neura::KernelOp>(
         task_a.getLoc(), merged_kernel_results, merged_kernel_inputs,
         merged_iter_args,
-        /*cgra_id=*/nullptr, /*kernel_name=*/nullptr,
-        /*accelerator=*/builder.getStringAttr("neura"));
+        /*cgra_id=*/nullptr,
+        /*kernel_name=*/nullptr,
+        /*accelerator=*/builder.getStringAttr("neura"),
+        /*kernel_metadata=*/nullptr);
     fused_kernel->setAttr("dataflow_mode", builder.getStringAttr("predicate"));
 
     // Builds kernel entry block and block-arg mappings.
     Region &fused_kernel_region = fused_kernel.getBody();
     Block *kernel_body = builder.createBlock(&fused_kernel_region);
+    // TODO: Preserve the predicated entry-block argument types from the
+    // original kernels. Kernel operands represent raw boundary values, while
+    // kernel region arguments represent values inside the predicated dataflow.
+    // Reusing the outer operand types here breaks that boundary contract.
     for (Value v : merged_kernel_inputs)
       kernel_body->addArgument(v.getType(), task_a.getLoc());
     for (Value v : merged_iter_args)
