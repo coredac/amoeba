@@ -141,7 +141,7 @@ def TaskflowChannelOp
 }
 
 //----------------------------------------------------------------------
-// Intra-Task Operations.
+// Intra-Task Operations for Neura Backend.
 //----------------------------------------------------------------------
 // Counter operation representing loop iteration control within a Taskflow task.
 def TaskflowCounterOp : TaskflowOpBase<"counter", []> {
@@ -241,6 +241,65 @@ def TaskflowHyperblockYieldOp
 
   let builders = [OpBuilder<
       (ins), [{build($_builder, $_state, ValueRange{}, ValueRange{});}]>];
+}
+
+// Reads ordered value sequences from slices of a memref.
+def TaskflowStreamReadOp : TaskflowOpBase<"stream_read", [ParentOneOf<["TaskflowTaskOp"]>]> {
+  let summary = "Read ordered value streams from a memref";
+
+  let description = [{
+    Reads one ordered value stream for each access map.
+
+    Access maps describe memory access order.
+
+    Example:
+      %values:2 = taskflow.stream_read %source maps [
+        affine_map<(i) -> (i, 0)>,
+        affine_map<(i) -> (i, 1)>
+      ] : memref<4x2xi32> -> (i32, i32)
+  }];
+
+  let arguments = (ins
+      AnyMemRef:$source,
+      AffineMapArrayAttr:$access_maps
+  );
+
+  let results = (outs Variadic<AnyType>:$values);
+
+  let assemblyFormat = [{
+    $source `maps` $access_maps attr-dict
+    `:` type($source) `->` `(` type($values) `)`
+  }];
+}
+
+// Writes ordered value streams into slices of a memref.
+def TaskflowStreamWriteOp: TaskflowOpBase<"stream_write", [ParentOneOf<["TaskflowTaskOp"]>]>{
+  let summary = "Write ordered value streams into a memref";
+
+  let description = [{
+    Writes each input value stream into the target memref according to the
+    corresponding access map.
+
+    Access maps describe destination addresses and value order.
+
+    Example:
+      taskflow.stream_write(%value0, %value1 : i32, i32) to %target maps [
+        affine_map<(i) -> (i, 0)>,
+        affine_map<(i) -> (i, 1)>
+      ] : memref<4x2xi32>
+  }];
+
+   let arguments = (ins
+      Variadic<AnyType>:$values,
+      AnyMemRef:$target,
+      AffineMapArrayAttr:$access_maps
+  );
+
+  let assemblyFormat = [{
+    `(` $values `:` type($values) `)`
+    `to` $target `maps` $access_maps attr-dict
+    `:` type($target)
+  }];
 }
 
 #endif // TASKFLOW_OPS_TD
