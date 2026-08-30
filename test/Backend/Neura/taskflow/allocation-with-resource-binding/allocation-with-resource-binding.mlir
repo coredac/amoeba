@@ -9,7 +9,7 @@
 // The three tasks form a linear chain: Task_0 → Task_1 → Task_2.
 
 // RUN: mlir-amoeba-opt %s --orchestrate-tasks-on-accelerators \
-// RUN:   --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN:   --architecture-spec=%S/../../archspec/architecture_4x4.yaml \
 // RUN:   -o %t.allocated_4x4.mlir
 // RUN: FileCheck %s --input-file=%t.allocated_4x4.mlir
 

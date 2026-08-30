@@ -19,7 +19,7 @@
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
-// RUN: --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN: --architecture-spec=%S/../../archspec/architecture_4x4.yaml \
 // RUN: -o %t.map_4x4_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_4x4_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-4x4
 
@@ -27,7 +27,7 @@
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
-// RUN: --architecture-spec=%S/../../../archspec/architecture_with_counter.yaml \
+// RUN: --architecture-spec=%S/../../archspec/architecture_with_counter.yaml \
 // RUN: -o %t.map_1x1_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_1x1_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-1x1
 
@@ -35,7 +35,7 @@
 // RUN: --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial-temporal' \
-// RUN: --architecture-spec=%S/../../../archspec/architecture_1x2.yaml \
+// RUN: --architecture-spec=%S/../../archspec/architecture_1x2.yaml \
 // RUN: -o %t.map_1x2_spatial_temporal.mlir
 // RUN: FileCheck %s --input-file=%t.map_1x2_spatial_temporal.mlir --check-prefixes=MAP-SPATIAL-TEMPORAL-1x2
 
@@ -62,7 +62,7 @@
 // RUN: --transform-ctrl-to-data-flow \
 // RUN: --fold-constant \
 // RUN: '--resource-aware-task-optimization=balance-skip-mapper=false' \
-// RUN: --architecture-spec=%S/../../../archspec/architecture_with_counter.yaml \
+// RUN: --architecture-spec=%S/../../archspec/architecture_with_counter.yaml \
 // RUN: -o %t.resopt.mlir
 // RUN: FileCheck %s --input-file=%t.resopt.mlir --check-prefixes=RESOPT
 
