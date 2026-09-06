@@ -36,6 +36,29 @@ set(
   "${AMOEBA_PYTHON_PACKAGE_ROOT}/taskflow_mlir"
 )
 
+# Keep the packaged Python sources and their embedded C API dependencies in
+# one list.
+set(AMOEBA_PYTHON_SOURCES
+  MLIRPythonSources.Core
+  MLIRPythonExtension.RegisterEverything
+
+  MLIRPythonSources.Dialects.builtin
+  MLIRPythonSources.Dialects.affine
+  MLIRPythonSources.Dialects.arith
+  MLIRPythonSources.Dialects.cf
+  MLIRPythonSources.Dialects.complex
+  MLIRPythonSources.Dialects.func
+  MLIRPythonSources.Dialects.linalg
+  MLIRPythonSources.Dialects.math
+  MLIRPythonSources.Dialects.memref
+  MLIRPythonSources.Dialects.scf
+  MLIRPythonSources.Dialects.tensor
+  MLIRPythonSources.Dialects.vector
+
+  NeuraPythonSources
+  AmoebaPythonSources
+)
+
 add_mlir_python_common_capi_library(AmoebaPythonCAPI
   INSTALL_COMPONENT AmoebaPythonModules
 
@@ -48,10 +71,7 @@ add_mlir_python_common_capi_library(AmoebaPythonCAPI
   RELATIVE_INSTALL_ROOT "../../../.."
 
   DECLARED_SOURCES
-    MLIRPythonSources.Core
-    MLIRPythonExtension.RegisterEverything
-    NeuraPythonSources
-    AmoebaPythonSources
+    ${AMOEBA_PYTHON_SOURCES}
 )
 
 add_mlir_python_modules(AmoebaPythonModules
@@ -62,23 +82,7 @@ add_mlir_python_modules(AmoebaPythonModules
     "python_packages/amoeba_core/taskflow_mlir"
 
   DECLARED_SOURCES
-    MLIRPythonSources.Core
-    MLIRPythonExtension.RegisterEverything
-
-    MLIRPythonSources.Dialects.builtin
-    MLIRPythonSources.Dialects.affine
-    MLIRPythonSources.Dialects.arith
-    MLIRPythonSources.Dialects.cf
-    MLIRPythonSources.Dialects.func
-    MLIRPythonSources.Dialects.linalg
-    MLIRPythonSources.Dialects.math
-    MLIRPythonSources.Dialects.memref
-    MLIRPythonSources.Dialects.scf
-    MLIRPythonSources.Dialects.tensor
-    MLIRPythonSources.Dialects.vector
-
-    NeuraPythonSources
-    AmoebaPythonSources
+    ${AMOEBA_PYTHON_SOURCES}
 
   COMMON_CAPI_LINK_LIBS
     AmoebaPythonCAPI
