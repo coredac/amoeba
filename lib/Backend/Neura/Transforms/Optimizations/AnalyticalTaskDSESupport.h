@@ -109,8 +109,7 @@ collectAnalyticalTaskFacts(func::FuncOp func, std::string &error);
 llvm::SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
                                                        int64_t gridCols,
                                                        int64_t perCgraRows,
-                                                       int64_t perCgraCols,
-                                                       int64_t maxCgrasPerTask);
+                                                       int64_t perCgraCols);
 // Visits every shape tuple that admits a simultaneous, non-overlapping
 // placement on the physical grid. `shapeIndices` follows task order and indexes
 // `shapes`; the valid candidate index is contiguous and starts at zero. Returns

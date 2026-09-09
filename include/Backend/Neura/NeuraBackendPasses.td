@@ -11,8 +11,7 @@ def ConvertTaskflowToNeura : Pass<"convert-taskflow-to-neura", "ModuleOp"> {
     Converts taskflow.hyperblock operations and their counters into
     neura.kernel operations suitable for CGRA tile-array mapping.
   }];
-  let constructor =
-      "::mlir::amoeba::neura::createConvertTaskflowToNeuraPass()";
+  let constructor = "::mlir::amoeba::neura::createConvertTaskflowToNeuraPass()";
   let dependentDialects = ["mlir::taskflow::TaskflowDialect",
                            "mlir::neura::NeuraDialect",
                            "mlir::affine::AffineDialect"];
@@ -36,8 +35,7 @@ def ClassifyTaskAndCounter : Pass<"classify-task-and-counter", "ModuleOp"> {
     Annotates taskflow.task and taskflow.counter operations with the
     structural and runtime-management information consumed by Neura.
   }];
-  let constructor =
-      "::mlir::amoeba::neura::createClassifyTaskAndCounterPass()";
+  let constructor = "::mlir::amoeba::neura::createClassifyTaskAndCounterPass()";
   let dependentDialects = ["mlir::affine::AffineDialect",
                            "mlir::arith::ArithDialect",
                            "mlir::func::FuncDialect",
@@ -74,18 +72,12 @@ def EnumerateAnalyticalTaskCandidates
     static counter trip counts and does not score candidates or invoke the
     mapper. Fusion, fission, tiling, placement, and temporal order are fixed.
   }];
-  let options = [
-    Option<"functionName", "function", "std::string", /*default=*/"\"\"",
+  let options =
+      [Option<
+           "functionName", "function", "std::string", /*default=*/"\"\"",
            "Taskflow function to process; inferred when exactly one exists.">,
-    Option<"outputFile", "output", "std::string", /*default=*/"\"\"",
-           "Path to the candidate JSONL manifest.">,
-    Option<"maxCandidates", "max-candidates", "int64_t",
-           /*default=*/"1000000",
-           "Fail instead of publishing a partial manifest above this count.">,
-    Option<"maxCgrasPerTask", "max-cgras-per-task", "int64_t",
-           /*default=*/"4",
-           "Largest rectangular physical footprint to enumerate per task.">
-  ];
+       Option<"outputFile", "output", "std::string", /*default=*/"\"\"",
+              "Path to the candidate JSONL manifest.">];
   let constructor =
       "::mlir::amoeba::neura::createEnumerateAnalyticalTaskCandidatesPass()";
   let dependentDialects = ["mlir::arith::ArithDialect",
@@ -100,8 +92,7 @@ def FuseTask : Pass<"fuse-task", "func::FuncOp"> {
     evaluated with Neura lowering and MII metrics.
   }];
   let constructor = "::mlir::amoeba::neura::createFuseTaskPass()";
-  let dependentDialects = ["mlir::LLVM::LLVMDialect",
-                           "mlir::func::FuncDialect",
+  let dependentDialects = ["mlir::LLVM::LLVMDialect", "mlir::func::FuncDialect",
                            "mlir::arith::ArithDialect",
                            "mlir::memref::MemRefDialect",
                            "mlir::neura::NeuraDialect",

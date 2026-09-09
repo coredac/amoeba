@@ -157,20 +157,17 @@ collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
 SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
                                                  int64_t gridCols,
                                                  int64_t perCgraRows,
-                                                 int64_t perCgraCols,
-                                                 int64_t maxCgrasPerTask) {
+                                                 int64_t perCgraCols) {
   // The candidate domain contains only concrete integer rectangles.
   SmallVector<RectShape> result;
-  if (gridRows <= 0 || gridCols <= 0 || perCgraRows <= 0 || perCgraCols <= 0 ||
-      maxCgrasPerTask <= 0)
+  if (gridRows <= 0 || gridCols <= 0 || perCgraRows <= 0 || perCgraCols <= 0)
     return result;
 
   const int64_t gridSize =
       gridRows > std::numeric_limits<int64_t>::max() / gridCols
           ? std::numeric_limits<int64_t>::max()
           : gridRows * gridCols;
-  const int64_t maxCount = std::min(maxCgrasPerTask, gridSize);
-  for (int64_t count = 1; count <= maxCount; ++count) {
+  for (int64_t count = 1; count <= gridSize; ++count) {
     for (const CgraShape &physicalShape : taskflow::getRectangularShapes(
              static_cast<int>(count), static_cast<int>(gridRows),
              static_cast<int>(gridCols))) {

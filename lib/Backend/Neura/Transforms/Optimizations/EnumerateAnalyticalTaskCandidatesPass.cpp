@@ -49,19 +49,10 @@ struct EnumerateAnalyticalTaskCandidatesPass
   Option<std::string> outputFile{*this, "output",
                                  llvm::cl::desc("Candidate JSONL output path."),
                                  llvm::cl::init("")};
-  Option<int64_t> maxCandidates{
-      *this, "max-candidates",
-      llvm::cl::desc("Fails rather than publishing a partial manifest."),
-      llvm::cl::init(1000000)};
-  Option<int64_t> maxCgrasPerTask{
-      *this, "max-cgras-per-task",
-      llvm::cl::desc("Limits the rectangular physical footprint per task."),
-      llvm::cl::init(4)};
-
   void runOnOperation() override {
-    // Selects the Taskflow function and rejects invalid safety limits. Besides
-    // the candidate file, a successful run attaches each canonical task-body
-    // hash to its source task so derived artifacts can bind to the same body.
+    // Selects the Taskflow function. Besides the candidate file, a successful
+    // run attaches each canonical task-body hash to its source task so derived
+    // artifacts can bind to the same body.
     ModuleOp module = getOperation();
     std::string error;
     FailureOr<func::FuncOp> selectedFunction =
@@ -71,10 +62,8 @@ struct EnumerateAnalyticalTaskCandidatesPass
       return signalPassFailure();
     }
     func::FuncOp func = *selectedFunction;
-    if (outputFile.getValue().empty() || maxCandidates.getValue() <= 0 ||
-        maxCgrasPerTask.getValue() <= 0) {
-      func.emitError() << "output, positive max-candidates, and positive "
-                          "max-cgras-per-task are required";
+    if (outputFile.getValue().empty()) {
+      func.emitError() << "output is required";
       return signalPassFailure();
     }
 
@@ -90,8 +79,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
         ::mlir::neura::getArchitecture();
     SmallVector<RectShape> shapes = enumerateStaticRectShapes(
         architecture.getMultiCgraRows(), architecture.getMultiCgraColumns(),
-        architecture.getPerCgraRows(), architecture.getPerCgraColumns(),
-        maxCgrasPerTask.getValue());
+        architecture.getPerCgraRows(), architecture.getPerCgraColumns());
     if (shapes.empty()) {
       func.emitError() << "declared rectangular shape space is empty";
       return signalPassFailure();
@@ -108,7 +96,6 @@ struct EnumerateAnalyticalTaskCandidatesPass
     // The concrete origins remain a downstream heuristic choice; temporal
     // reuse cannot rescue an over-capacity tuple in this search scope.
     uint64_t candidateCount = 0;
-    bool exceededLimit = false;
     ConcurrentPackingCache packing(architecture.getMultiCgraRows(),
                                    architecture.getMultiCgraColumns());
     SmallVector<SmallVector<uint8_t>> usedCostQueries(taskFacts->size());
@@ -117,22 +104,11 @@ struct EnumerateAnalyticalTaskCandidatesPass
     bool countedAll = visitConcurrentlyPackableShapeTuples(
         taskFacts->size(), shapes, packing,
         [&](uint64_t index, ArrayRef<size_t> shapeIndices) {
-          if (index >= static_cast<uint64_t>(maxCandidates.getValue())) {
-            exceededLimit = true;
-            return false;
-          }
           candidateCount = index + 1;
           for (auto [taskIndex, shapeIndex] : llvm::enumerate(shapeIndices))
             usedCostQueries[taskIndex][shapeIndex] = 1;
           return true;
         });
-    if (!countedAll && exceededLimit) {
-      func.emitError() << "complete concurrently packable shape space exceeds "
-                          "max-candidates="
-                       << maxCandidates.getValue()
-                       << "; refusing to publish a partial candidate manifest";
-      return signalPassFailure();
-    }
     if (!countedAll) {
       func.emitError() << "failed while counting the packable shape space";
       return signalPassFailure();
@@ -198,7 +174,6 @@ struct EnumerateAnalyticalTaskCandidatesPass
           header["spatial_capacity_policy"] = kSpatialCapacityPolicy.str();
           header["function"] = function;
           header["architecture"] = std::move(architectureRecord);
-          header["max_cgras_per_task"] = maxCgrasPerTask.getValue();
           header["tasks"] = std::move(tasks);
           header["cost_queries"] = std::move(costQueries);
           header["fixed_axes"] = std::move(fixedAxes);
