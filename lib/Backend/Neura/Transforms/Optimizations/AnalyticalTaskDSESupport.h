@@ -50,7 +50,9 @@ struct RectShape {
   int64_t mapperRows = 1;
   int64_t mapperCols = 1;
 
-  int64_t cgraCount() const { return rows * cols; }
+  int64_t cgraCount() const {
+    return rows * cols;
+  }
   std::string toCgraShapeAttrValue() const;
 };
 
@@ -87,8 +89,12 @@ public:
       : gridRows_(gridRows), gridCols_(gridCols) {}
 
   bool canPack(llvm::ArrayRef<RectShape> shapes);
-  int64_t gridRows() const { return gridRows_; }
-  int64_t gridCols() const { return gridCols_; }
+  int64_t gridRows() const {
+    return gridRows_;
+  }
+  int64_t gridCols() const {
+    return gridCols_;
+  }
 
 private:
   using Key = std::vector<std::pair<int64_t, int64_t>>;

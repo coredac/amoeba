@@ -440,7 +440,9 @@ struct CgraPosition {
     return row == other.row && col == other.col;
   }
 
-  bool operator!=(const CgraPosition &other) const { return !(*this == other); }
+  bool operator!=(const CgraPosition &other) const {
+    return !(*this == other);
+  }
 
   int manhattanDistance(const CgraPosition &other) const {
     return std::abs(row - other.row) + std::abs(col - other.col);
@@ -466,7 +468,9 @@ struct TaskPlacement {
   }
 
   // Returns the number of CGRAs assigned to this task.
-  size_t cgraCount() const { return cgra_positions.size(); }
+  size_t cgraCount() const {
+    return cgra_positions.size();
+  }
 
   // Returns true if any CGRA in this task is grid-adjacent to any CGRA
   // in `other`, indicating that direct data forwarding between tasks is
