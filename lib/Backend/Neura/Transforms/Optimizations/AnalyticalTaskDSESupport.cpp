@@ -151,6 +151,9 @@ collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
 // Enumerates every legal static physical rectangle and derives its mapper
 // dimensions from the architecture getters. The deterministic order defines
 // the mixed-radix alphabet for candidate IDs.
+// TODO: Extend the analytical candidate schema and its consumers to represent
+// non-rectangular shapes. The analytical search intentionally enumerates only
+// fixed-orientation rectangles until that contract exists end to end.
 SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
                                                  int64_t gridCols,
                                                  int64_t perCgraRows,

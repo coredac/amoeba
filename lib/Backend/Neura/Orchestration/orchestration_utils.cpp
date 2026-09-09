@@ -71,108 +71,6 @@ SmallVector<CgraShape> getRectangularShapes(int cgra_count, int grid_rows,
   return shapes;
 }
 
-// Internal helpers
-
-namespace {
-
-// Returns the set of non-rectangular shapes for `cgra_count` CGRAs.
-// Currently defined for cgra_count == 3 (L-shape) and cgra_count == 4
-// (L-shape and T-shape variants).
-SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes;
-
-  if (cgra_count == 3) {
-    // L-shape 3 CGRAs: (0,0)(1,0)(0,1) — bbox 2×2
-    shapes.push_back({2, 2, false, {{0, 0}, {1, 0}, {0, 1}}});
-  }
-
-  if (cgra_count == 4) {
-    // T-shape: three in a row + one below centre
-    //   (0,0)(1,0)(2,0)(1,1)  — bbox 2×3
-    shapes.push_back({2, 3, false, {{0, 0}, {1, 0}, {2, 0}, {1, 1}}});
-
-    // L-shape: three in a column + one offset
-    //   (0,0)(0,1)(0,2)(1,2)  — bbox 3×2
-    shapes.push_back({3, 2, false, {{0, 0}, {0, 1}, {0, 2}, {1, 2}}});
-  }
-
-  return shapes;
-}
-
-} // namespace
-
-// getAllPlacementShapes
-
-SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes = getRectangularShapes(cgra_count);
-  llvm::sort(shapes, [](const CgraShape &lhs, const CgraShape &rhs) {
-    int squareness_lhs = std::abs(lhs.rows - lhs.cols);
-    int squareness_rhs = std::abs(rhs.rows - rhs.cols);
-    if (squareness_lhs != squareness_rhs) {
-      return squareness_lhs < squareness_rhs;
-    }
-    return lhs.area() < rhs.area();
-  });
-
-  // 2. Non-rectangular shapes with all four 90° rotations.
-  auto base_non_rect = getNonRectangularShapes(cgra_count);
-  for (const auto &base : base_non_rect) {
-    // Generates 4 rotations of the cgra_positions list.
-    // Rotation by 90° CW: (col, row) -> (row, -col).
-    // Each rotation is normalised so that offsets start from (0, 0).
-    SmallVector<SmallVector<std::pair<int, int>>, 4> rotation_variants;
-    rotation_variants.push_back(
-        SmallVector<std::pair<int, int>>(base.cgra_positions));
-
-    auto prev_positions = base.cgra_positions;
-    for (int rotation_idx = 0; rotation_idx < 3; ++rotation_idx) {
-      SmallVector<std::pair<int, int>> rotated_positions;
-      for (auto &[col_off, row_off] : prev_positions)
-        rotated_positions.push_back(
-            {row_off, -col_off}); // 90° CW in (col, row) space
-
-      // Normalises to non-negative offsets starting from (0, 0).
-      int min_col = INT_MAX, min_row = INT_MAX;
-      for (auto &[col_off, row_off] : rotated_positions) {
-        min_col = std::min(min_col, col_off);
-        min_row = std::min(min_row, row_off);
-      }
-      for (auto &[col_off, row_off] : rotated_positions) {
-        col_off -= min_col;
-        row_off -= min_row;
-      }
-      rotation_variants.push_back(rotated_positions);
-      prev_positions = rotated_positions;
-    }
-
-    // Deduplicates rotations that produce the same position set.
-    // Hash parameters: multiplier 131 and positional weight 17 are chosen to
-    // give low collision rates for small integer coordinate sets.
-    llvm::DenseSet<int64_t> seen_hashes;
-    for (auto &positions : rotation_variants) {
-      auto sorted_positions = positions;
-      llvm::sort(sorted_positions,
-                 [](const std::pair<int, int> &lhs,
-                    const std::pair<int, int> &rhs) { return lhs < rhs; });
-      int64_t hash = 0;
-      for (auto &[col_off, row_off] : sorted_positions)
-        hash = hash * 131 + col_off * 17 + row_off;
-      if (!seen_hashes.insert(hash).second) {
-        continue;
-      }
-      // Computes bounding box for this rotation.
-      int max_col = 0, max_row = 0;
-      for (auto &[col_off, row_off] : positions) {
-        max_col = std::max(max_col, col_off);
-        max_row = std::max(max_row, row_off);
-      }
-      shapes.push_back({max_row + 1, max_col + 1, false, std::move(positions)});
-    }
-  }
-
-  return shapes;
-}
-
 // Infers a static trip count from Taskflow counter chains. A constant counter
 // such as `0..10 step 3` contributes four iterations. Counts multiply along
 // each root-to-leaf chain; sibling chains and independent roots use the maximum
@@ -404,7 +302,8 @@ bool canAllTasksFitOnGrid(ArrayRef<int> task_cgra_counts) {
     if (cgra_count <= 0 || cgra_count > remaining_cgras)
       return false;
     remaining_cgras -= cgra_count;
-    SmallVector<CgraShape> shapes = getAllPlacementShapes(cgra_count);
+    SmallVector<CgraShape> shapes =
+        getRectangularShapes(cgra_count, kCgraGridRows, kCgraGridCols);
     if (shapes.empty())
       return false;
     shape_choices.push_back(std::move(shapes));
@@ -965,7 +864,7 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
     }
   }
   if (shapes_to_try.empty()) {
-    shapes_to_try = getAllPlacementShapes(cgra_count);
+    shapes_to_try = getRectangularShapes(cgra_count, grid_rows_, grid_cols_);
   }
 
   int task_duration = task_node->getDuration();

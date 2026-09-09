@@ -68,32 +68,7 @@ static bool canFitOnGrid(int cgra_count) {
   return cgra_count >= 1 && cgra_count <= kMaxCgrasPerTask;
 }
 
-// Returns the set of non-rectangular shapes for `cgra_count` CGRAs.
-// Currently defined for cgra_count == 3 (L-shape) and cgra_count == 4
-// (L-shape and T-shape variants).  Each shape's coordinates are chosen
-// so the bounding box is as small as possible.
-static SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes;
-
-  if (cgra_count == 3) {
-    // L-shape 3 CGRAs: (0,0)(1,0)(0,1) — bbox 2×2
-    shapes.push_back({2, 2, false, {{0, 0}, {1, 0}, {0, 1}}});
-  }
-
-  if (cgra_count == 4) {
-    // T-shape: three in a row + one below centre
-    //   (0,0)(1,0)(2,0)(1,1)  — bbox 2×3
-    shapes.push_back({2, 3, false, {{0, 0}, {1, 0}, {2, 0}, {1, 1}}});
-
-    // L-shape: three in a column + one offset
-    //   (0,0)(0,1)(0,2)(1,2)  — bbox 3×2
-    shapes.push_back({3, 2, false, {{0, 0}, {0, 1}, {0, 2}, {1, 2}}});
-  }
-
-  return shapes;
-}
-
-// Picks the best shape for display/profiling.
+// Picks the best rectangular shape for display/profiling.
 // We prefer shapes with the most compact physical layout (smallest maximum
 // distance between nodes) to minimize communication latency. In cases of
 // identical bounding box area, we prefer more square-like bounds over long
@@ -104,21 +79,8 @@ static SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
 // legitimately deferred to the downstream orchestration pass, as speculative
 // profiling assumes unconstrained placement.
 static CgraShape pickBestShape(int cgra_count) {
-  // For cgra_count == 3, the 2x2 L-shape has a smaller maximum physical routing
-  // distance (dist=2) compared to a 1x3 rectangle (dist=3), despite having a
-  // larger bounding box. We explicitly prefer the more compact L-shape here for
-  // better speculative latency.
-  if (cgra_count == 3) {
-    auto non_rect_shapes = getNonRectangularShapes(3);
-    if (!non_rect_shapes.empty()) {
-      return non_rect_shapes.front();
-    }
-  }
-
-  SmallVector<CgraShape> candidates = getRectangularShapes(cgra_count);
-  for (const auto &s : getNonRectangularShapes(cgra_count)) {
-    candidates.push_back(s);
-  }
+  SmallVector<CgraShape> candidates =
+      getRectangularShapes(cgra_count, kCgraGridRows, kCgraGridCols);
 
   if (!candidates.empty()) {
     return *std::min_element(candidates.begin(), candidates.end(),
@@ -165,7 +127,9 @@ struct TaskGraphNode {
 
   // Returns estimated task latency using the pipelined execution model:
   //   latency = II * (trip_count - 1) + steps.
-  int64_t estimatedLatency() const { return ii * (trip_count - 1) + steps; }
+  int64_t estimatedLatency() const {
+    return ii * (trip_count - 1) + steps;
+  }
 };
 
 class TaskDependencyGraph {

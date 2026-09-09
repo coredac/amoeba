@@ -70,17 +70,6 @@ llvm::SmallVector<CgraShape>
 getRectangularShapes(int cgra_count, int grid_rows = kCgraGridRows,
                      int grid_cols = kCgraGridCols);
 
-// Generates all placement-candidate shapes for `cgra_count` CGRAs, including
-// rotations. Rectangular shapes include both orientations (rows×cols and
-// cols×rows, deduplicated for squares). Non-rectangular shapes include all
-// four 90° rotations.
-//
-// Ordering (tried first to last):
-//   1. Rectangular shapes, sorted by squareness (e.g. 2×2 before 1×4),
-//      with smaller bounding-box area as tiebreaker.
-//   2. Non-rectangular shapes (L, T, etc.) in all unique rotations.
-llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
-
 // Infers a trip count from Taskflow counter chains whose bounds and steps are
 // constant index values. Counts multiply along each root-to-leaf chain;
 // concurrent sibling chains and independent roots use the maximum. Returns
@@ -101,8 +90,8 @@ bool canShapesFitOnGrid(llvm::ArrayRef<CgraShape> task_shapes, int grid_rows,
 // Checks by exhaustive backtracking whether one shape choice for each task can
 // be placed simultaneously on the default grid.
 //
-// Each task is specified by its CGRA count. All valid rectangular and
-// non-rectangular orientations for that count are considered.
+// Each task is specified by its CGRA count. Every rectangular orientation for
+// that count is considered.
 //
 // `task_cgra_counts` contains the cgra_count for every task in the graph
 // (including the speculatively modified one).
