@@ -62,6 +62,37 @@ def OrchestrateTasksOnAccelerators
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
 
+def EnumerateAnalyticalTaskCandidates
+    : Pass<"enumerate-analytical-task-candidates", "ModuleOp"> {
+  let summary = "Freeze all concurrently packable static task shapes";
+  let description = [{
+    Enumerates every ordered assignment of fixed-orientation rectangular
+    per-task CGRA shapes that admits a simultaneous, non-overlapping placement
+    on the physical multi-CGRA grid, then writes a JSONL manifest. Exact
+    placement feasibility is checked with backtracking; concrete placement
+    coordinates remain a downstream heuristic choice. The pass accepts only
+    static counter trip counts and does not score candidates or invoke the
+    mapper. Fusion, fission, tiling, placement, and temporal order are fixed.
+  }];
+  let options = [
+    Option<"functionName", "function", "std::string", /*default=*/"\"\"",
+           "Taskflow function to process; inferred when exactly one exists.">,
+    Option<"outputFile", "output", "std::string", /*default=*/"\"\"",
+           "Path to the candidate JSONL manifest.">,
+    Option<"maxCandidates", "max-candidates", "int64_t",
+           /*default=*/"1000000",
+           "Fail instead of publishing a partial manifest above this count.">,
+    Option<"maxCgrasPerTask", "max-cgras-per-task", "int64_t",
+           /*default=*/"4",
+           "Largest rectangular physical footprint to enumerate per task.">
+  ];
+  let constructor =
+      "::mlir::amoeba::neura::createEnumerateAnalyticalTaskCandidatesPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
 def FuseTask : Pass<"fuse-task", "func::FuncOp"> {
   let summary = "Fuse Taskflow tasks using Neura profitability metrics";
   let description = [{
