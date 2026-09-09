@@ -90,17 +90,21 @@ FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
 
 // Global placement feasibility.
 
-// Simulates greedy placement of all tasks' shapes on the kCgraGridRows x
-// kCgraGridCols grid to verify that they physically fit without overlap.
+// Checks by exhaustive backtracking whether the fixed, oriented task shapes
+// can be placed simultaneously without overlap. The grid dimensions are
+// explicit so callers can use the active architecture.
+bool canShapesFitOnGrid(llvm::ArrayRef<CgraShape> task_shapes, int grid_rows,
+                        int grid_cols);
+
+// Checks by exhaustive backtracking whether one shape choice for each task can
+// be placed simultaneously on the default grid.
 //
-// For each task, all valid shapes (including rotations) are tried. Rectangular
-// shapes prefer square-like orientations (e.g. 2x2 over 1x4). Non-rectangular
-// shapes are tried in all four 90 degree rotations.
+// Each task is specified by its CGRA count. All valid rectangular and
+// non-rectangular orientations for that count are considered.
 //
 // `task_cgra_counts` contains the cgra_count for every task in the graph
 // (including the speculatively modified one).
 //
-// Returns true if all tasks can be placed without overlap.
 bool canAllTasksFitOnGrid(llvm::ArrayRef<int> task_cgra_counts);
 
 // Task scheduling utilities.

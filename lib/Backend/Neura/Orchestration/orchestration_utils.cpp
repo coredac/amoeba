@@ -15,6 +15,7 @@
 #include <cassert>
 #include <climits>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -286,93 +287,132 @@ FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
   return std::optional<int64_t>{total};
 }
 
-// canAllTasksFitOnGrid
+// Returns the occupied (column, row) offsets for one valid shape.
+static std::optional<SmallVector<std::pair<int, int>>>
+getShapeCells(const CgraShape &shape, int grid_rows, int grid_cols) {
+  if (shape.rows <= 0 || shape.cols <= 0 || shape.rows > grid_rows ||
+      shape.cols > grid_cols)
+    return std::nullopt;
 
-bool canAllTasksFitOnGrid(ArrayRef<int> task_cgra_counts) {
-  constexpr int kTotalCGRAs = kCgraGridRows * kCgraGridCols;
-
-  // Quick capacity check: total CGRAs must not exceed grid size.
-  int total_cgras = 0;
-  for (int count : task_cgra_counts)
-    total_cgras += count;
-  if (total_cgras > kTotalCGRAs) {
-    return false;
+  SmallVector<std::pair<int, int>> cells;
+  if (shape.is_rectangular) {
+    for (int row = 0; row < shape.rows; ++row)
+      for (int col = 0; col < shape.cols; ++col)
+        cells.push_back({col, row});
+    return cells;
   }
+  if (shape.cgra_positions.empty())
+    return std::nullopt;
 
-  // Simulates placement on a grid.
-  bool occupied[kCgraGridRows][kCgraGridCols] = {};
+  DenseSet<int64_t> seen;
+  for (auto [col, row] : shape.cgra_positions) {
+    if (col < 0 || col >= shape.cols || row < 0 || row >= shape.rows)
+      return std::nullopt;
+    int64_t key = static_cast<int64_t>(row) * shape.cols + col;
+    if (!seen.insert(key).second)
+      return std::nullopt;
+    cells.push_back({col, row});
+  }
+  return cells;
+}
 
-  // Sorts tasks by descending cgra_count for better packing (largest-first
-  // decreasing, a standard bin-packing heuristic).  Each task may have a
-  // different cgra_count because the balance phase only increments one
-  // bottleneck at a time; this array reflects the heterogeneous orchestration
-  // across all tasks in the current trial configuration.
-  SmallVector<int> sorted_counts(task_cgra_counts.begin(),
-                                 task_cgra_counts.end());
-  llvm::sort(sorted_counts, [](int lhs, int rhs) { return lhs > rhs; });
+// Explores every shape and origin choice so the feasibility result is exact.
+static bool placeShapeChoices(size_t task_index,
+                              ArrayRef<SmallVector<CgraShape>> shape_choices,
+                              int grid_rows, int grid_cols,
+                              MutableArrayRef<uint8_t> occupied) {
+  if (task_index == shape_choices.size())
+    return true;
 
-  for (int cgra_count : sorted_counts) {
-    SmallVector<CgraShape> candidates = getAllPlacementShapes(cgra_count);
-    bool placed = false;
+  for (const CgraShape &shape : shape_choices[task_index]) {
+    std::optional<SmallVector<std::pair<int, int>>> cells =
+        getShapeCells(shape, grid_rows, grid_cols);
+    if (!cells)
+      continue;
+    for (int origin_row = 0; origin_row + shape.rows <= grid_rows;
+         ++origin_row) {
+      for (int origin_col = 0; origin_col + shape.cols <= grid_cols;
+           ++origin_col) {
+        bool overlaps = llvm::any_of(*cells, [&](auto offset) {
+          auto [col, row] = offset;
+          return occupied[static_cast<size_t>((origin_row + row) * grid_cols +
+                                              origin_col + col)] != 0;
+        });
+        if (overlaps)
+          continue;
 
-    for (const auto &shape : candidates) {
-      if (placed)
-        break;
-
-      if (shape.is_rectangular) {
-        // Rectangular: tries every origin where the rows×cols bbox fits.
-        for (int origin_row = 0;
-             origin_row <= kCgraGridRows - shape.rows && !placed;
-             ++origin_row) {
-          for (int origin_col = 0;
-               origin_col <= kCgraGridCols - shape.cols && !placed;
-               ++origin_col) {
-            bool fits = true;
-            for (int delta_row = 0; delta_row < shape.rows && fits; ++delta_row)
-              for (int delta_col = 0; delta_col < shape.cols && fits;
-                   ++delta_col)
-                if (occupied[origin_row + delta_row][origin_col + delta_col])
-                  fits = false;
-            if (fits) {
-              for (int delta_row = 0; delta_row < shape.rows; ++delta_row)
-                for (int delta_col = 0; delta_col < shape.cols; ++delta_col)
-                  occupied[origin_row + delta_row][origin_col + delta_col] =
-                      true;
-              placed = true;
-            }
-          }
-        }
-      } else {
-        // Non-rectangular: cgra_positions stores (col, row) offsets.
-        for (int origin_row = 0; origin_row < kCgraGridRows && !placed;
-             ++origin_row) {
-          for (int origin_col = 0; origin_col < kCgraGridCols && !placed;
-               ++origin_col) {
-            bool fits = true;
-            for (auto &[col_off, row_off] : shape.cgra_positions) {
-              int abs_row = origin_row + row_off;
-              int abs_col = origin_col + col_off;
-              if (abs_row < 0 || abs_row >= kCgraGridRows || abs_col < 0 ||
-                  abs_col >= kCgraGridCols || occupied[abs_row][abs_col]) {
-                fits = false;
-                break;
-              }
-            }
-            if (fits) {
-              for (auto &[col_off, row_off] : shape.cgra_positions)
-                occupied[origin_row + row_off][origin_col + col_off] = true;
-              placed = true;
-            }
-          }
-        }
+        for (auto [col, row] : *cells)
+          occupied[static_cast<size_t>((origin_row + row) * grid_cols +
+                                       origin_col + col)] = 1;
+        if (placeShapeChoices(task_index + 1, shape_choices, grid_rows,
+                              grid_cols, occupied))
+          return true;
+        for (auto [col, row] : *cells)
+          occupied[static_cast<size_t>((origin_row + row) * grid_cols +
+                                       origin_col + col)] = 0;
       }
     }
-
-    if (!placed) {
-      return false;
-    }
   }
-  return true;
+  return false;
+}
+
+bool canShapesFitOnGrid(ArrayRef<CgraShape> task_shapes, int grid_rows,
+                        int grid_cols) {
+  if (grid_rows <= 0 || grid_cols <= 0 ||
+      static_cast<uint64_t>(grid_rows) * static_cast<uint64_t>(grid_cols) >
+          std::numeric_limits<size_t>::max())
+    return false;
+
+  const uint64_t grid_area = static_cast<uint64_t>(grid_rows) * grid_cols;
+  uint64_t occupied_cells = 0;
+  for (const CgraShape &shape : task_shapes) {
+    std::optional<SmallVector<std::pair<int, int>>> cells =
+        getShapeCells(shape, grid_rows, grid_cols);
+    if (!cells || cells->size() > grid_area - occupied_cells)
+      return false;
+    occupied_cells += cells->size();
+  }
+
+  SmallVector<CgraShape> largest_first(task_shapes.begin(), task_shapes.end());
+  llvm::sort(largest_first, [](const CgraShape &lhs, const CgraShape &rhs) {
+    auto cell_count = [](const CgraShape &shape) {
+      return shape.is_rectangular
+                 ? static_cast<int64_t>(shape.rows) * shape.cols
+                 : static_cast<int64_t>(shape.cgra_positions.size());
+    };
+    return cell_count(lhs) > cell_count(rhs);
+  });
+  SmallVector<SmallVector<CgraShape>> shape_choices;
+  shape_choices.reserve(largest_first.size());
+  for (const CgraShape &shape : largest_first)
+    shape_choices.push_back({shape});
+
+  SmallVector<uint8_t> occupied(
+      static_cast<size_t>(grid_rows) * static_cast<size_t>(grid_cols), 0);
+  return placeShapeChoices(0, shape_choices, grid_rows, grid_cols, occupied);
+}
+
+bool canAllTasksFitOnGrid(ArrayRef<int> task_cgra_counts) {
+  SmallVector<int> largest_first(task_cgra_counts.begin(),
+                                 task_cgra_counts.end());
+  llvm::sort(largest_first, std::greater<int>());
+
+  SmallVector<SmallVector<CgraShape>> shape_choices;
+  shape_choices.reserve(largest_first.size());
+  int remaining_cgras = kCgraGridRows * kCgraGridCols;
+  for (int cgra_count : largest_first) {
+    if (cgra_count <= 0 || cgra_count > remaining_cgras)
+      return false;
+    remaining_cgras -= cgra_count;
+    SmallVector<CgraShape> shapes = getAllPlacementShapes(cgra_count);
+    if (shapes.empty())
+      return false;
+    shape_choices.push_back(std::move(shapes));
+  }
+
+  SmallVector<uint8_t> occupied(kCgraGridRows * kCgraGridCols, 0);
+  return placeShapeChoices(0, shape_choices, kCgraGridRows, kCgraGridCols,
+                           occupied);
 }
 
 // Task scheduling utilities

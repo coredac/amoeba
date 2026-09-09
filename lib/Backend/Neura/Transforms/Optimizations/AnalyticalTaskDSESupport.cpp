@@ -185,82 +185,6 @@ SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
   return result;
 }
 
-// Tries to place the fixed-orientation rectangles exactly. This is a small
-// backtracking search over physical CGRA cells, not a solver and not the
-// downstream placement heuristic. Sorting large rectangles first only changes
-// search speed; it does not remove any legal placement.
-static bool placeRectangles(size_t rectangleIndex,
-                            ArrayRef<RectShape> rectangles, int64_t gridRows,
-                            int64_t gridCols,
-                            MutableArrayRef<uint8_t> occupied) {
-  if (rectangleIndex == rectangles.size())
-    return true;
-
-  const RectShape &shape = rectangles[rectangleIndex];
-  for (int64_t originRow = 0; originRow + shape.rows <= gridRows; ++originRow) {
-    for (int64_t originCol = 0; originCol + shape.cols <= gridCols;
-         ++originCol) {
-      bool overlaps = false;
-      for (int64_t row = 0; row < shape.rows && !overlaps; ++row) {
-        for (int64_t col = 0; col < shape.cols; ++col) {
-          size_t cell = static_cast<size_t>((originRow + row) * gridCols +
-                                            originCol + col);
-          if (occupied[cell]) {
-            overlaps = true;
-            break;
-          }
-        }
-      }
-      if (overlaps)
-        continue;
-
-      for (int64_t row = 0; row < shape.rows; ++row)
-        for (int64_t col = 0; col < shape.cols; ++col)
-          occupied[static_cast<size_t>((originRow + row) * gridCols +
-                                       originCol + col)] = 1;
-      if (placeRectangles(rectangleIndex + 1, rectangles, gridRows, gridCols,
-                          occupied))
-        return true;
-      for (int64_t row = 0; row < shape.rows; ++row)
-        for (int64_t col = 0; col < shape.cols; ++col)
-          occupied[static_cast<size_t>((originRow + row) * gridCols +
-                                       originCol + col)] = 0;
-    }
-  }
-  return false;
-}
-
-// The static shape-selection contract requires all task rectangles to be
-// resident simultaneously. The area check is only a cheap necessary condition;
-// backtracking is required because fixed rectangle orientations can conflict
-// even when their total area fits the grid.
-static bool canPackSimultaneously(ArrayRef<RectShape> selected,
-                                  int64_t gridRows, int64_t gridCols) {
-  if (gridRows <= 0 || gridCols <= 0 ||
-      gridRows > std::numeric_limits<int64_t>::max() / gridCols)
-    return false;
-  const int64_t gridArea = gridRows * gridCols;
-  int64_t selectedArea = 0;
-  SmallVector<RectShape> largestFirst(selected.begin(), selected.end());
-  for (const RectShape &shape : largestFirst) {
-    if (shape.rows <= 0 || shape.cols <= 0 || shape.rows > gridRows ||
-        shape.cols > gridCols || shape.rows > gridArea / shape.cols ||
-        selectedArea > gridArea - shape.cgraCount())
-      return false;
-    selectedArea += shape.cgraCount();
-  }
-  llvm::sort(largestFirst, [](const RectShape &lhs, const RectShape &rhs) {
-    if (lhs.cgraCount() != rhs.cgraCount())
-      return lhs.cgraCount() > rhs.cgraCount();
-    if (std::max(lhs.rows, lhs.cols) != std::max(rhs.rows, rhs.cols))
-      return std::max(lhs.rows, lhs.cols) > std::max(rhs.rows, rhs.cols);
-    return std::tie(lhs.rows, lhs.cols) > std::tie(rhs.rows, rhs.cols);
-  });
-
-  SmallVector<uint8_t> occupied(static_cast<size_t>(gridArea), 0);
-  return placeRectangles(0, largestFirst, gridRows, gridCols, occupied);
-}
-
 bool ConcurrentPackingCache::canPack(ArrayRef<RectShape> shapes) {
   Key key;
   key.reserve(shapes.size());
@@ -279,7 +203,30 @@ bool ConcurrentPackingCache::canPack(ArrayRef<RectShape> shapes) {
   auto found = results_.find(key);
   if (found != results_.end())
     return found->second;
-  bool result = canPackSimultaneously(shapes, gridRows_, gridCols_);
+
+  bool result = false;
+  if (gridRows_ > 0 && gridCols_ > 0 &&
+      gridRows_ <= std::numeric_limits<int>::max() &&
+      gridCols_ <= std::numeric_limits<int>::max()) {
+    SmallVector<CgraShape> fixedShapes;
+    fixedShapes.reserve(shapes.size());
+    bool dimensionsFit = true;
+    for (const RectShape &shape : shapes) {
+      if (shape.rows <= 0 || shape.cols <= 0 ||
+          shape.rows > std::numeric_limits<int>::max() ||
+          shape.cols > std::numeric_limits<int>::max()) {
+        dimensionsFit = false;
+        break;
+      }
+      fixedShapes.push_back({static_cast<int>(shape.rows),
+                             static_cast<int>(shape.cols),
+                             true,
+                             {}});
+    }
+    if (dimensionsFit)
+      result = canShapesFitOnGrid(fixedShapes, static_cast<int>(gridRows_),
+                                  static_cast<int>(gridCols_));
+  }
   results_.emplace(std::move(key), result);
   return result;
 }
