@@ -127,9 +127,7 @@ struct TaskGraphNode {
 
   // Returns estimated task latency using the pipelined execution model:
   //   latency = II * (trip_count - 1) + steps.
-  int64_t estimatedLatency() const {
-    return ii * (trip_count - 1) + steps;
-  }
+  int64_t estimatedLatency() const { return ii * (trip_count - 1) + steps; }
 };
 
 class TaskDependencyGraph {
@@ -1539,6 +1537,18 @@ struct ResourceAwareTaskOptimizationPass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
+
+    bool hasFixedShape = false;
+    func.walk([&](TaskflowTaskOp task) {
+      hasFixedShape |=
+          task->hasAttr("amoeba.analytical_shape_orientation_fixed");
+    });
+    if (hasFixedShape) {
+      func.emitError()
+          << "resource-aware-task-optimization cannot run after an analytical "
+             "task candidate has fixed resource shapes";
+      return signalPassFailure();
+    }
 
     bool use_analytical = (estimationMode.getValue() == "analytical");
 

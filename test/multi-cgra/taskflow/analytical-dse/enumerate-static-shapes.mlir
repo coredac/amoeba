@@ -10,6 +10,12 @@
 // RUN: FileCheck %s --input-file=%t.program --check-prefix=PROGRAM
 // RUN: FileCheck %s --input-file=%t.candidates.jsonl --check-prefix=CANDIDATES
 // RUN: FileCheck %s --input-file=%t.bound.mlir --check-prefix=BOUND
+// RUN: mlir-amoeba-opt %s \
+// RUN:   --classify-task-and-counter \
+// RUN:   '--materialize-analytical-task-candidate=candidates=%t.candidates.jsonl candidate-id=candidate-45' \
+// RUN:   --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN:   --mlir-print-op-on-diagnostic=false > %t.materialized 2>&1
+// RUN: FileCheck %s --input-file=%t.materialized --check-prefix=MATERIALIZED
 
 module {
   func.func @main(%a: memref<16xf32>, %b: memref<16xf32>) {
@@ -230,3 +236,25 @@ module {
 // PROGRAM-LABEL: Unknown YAML root key: extensions
 // PROGRAM-NEXT: Unknown YAML root key: simulator
 // PROGRAM-NEXT: [AnalyticalTaskDSE] enumerated all 156 concurrently packable shape candidates into {{.*}}.candidates.jsonl
+// MATERIALIZED-LABEL: module {
+// MATERIALIZED-NEXT:   func.func @main(%arg0: memref<16xf32>, %arg1: memref<16xf32>) attributes {analytical_task_candidate_id = "candidate-45", analytical_task_candidate_scope = "static-shape-concurrent-fit"} {
+// MATERIALIZED-NEXT:     %done_reads, %done_writes = taskflow.task @A will_reads(%arg0 : memref<16xf32>) will_writes(%arg0 : memref<16xf32>) [original_read_memrefs(%arg0 : memref<16xf32>), original_write_memrefs(%arg0 : memref<16xf32>)] {amoeba.analytical_shape_orientation_fixed, cgra_count = 3 : i32, cgra_shape = "1x3"} : (memref<16xf32>, memref<16xf32>) -> (memref<16xf32>, memref<16xf32>) {
+// MATERIALIZED-NEXT:     ^bb0(%arg2: memref<16xf32>, %arg3: memref<16xf32>):
+// MATERIALIZED-NEXT:       %c0 = arith.constant 0 : index
+// MATERIALIZED-NEXT:       %c10 = arith.constant 10 : index
+// MATERIALIZED-NEXT:       %c1 = arith.constant 1 : index
+// MATERIALIZED-NEXT:       %0 = taskflow.counter from %c0 to %c10 step %c1 attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
+// MATERIALIZED-NEXT:       taskflow.yield done_reads(%arg2 : memref<16xf32>) done_writes(%arg3 : memref<16xf32>)
+// MATERIALIZED-NEXT:     }
+// MATERIALIZED-NEXT:     %done_reads_0, %done_writes_1 = taskflow.task @B will_reads(%arg1 : memref<16xf32>) will_writes(%arg1 : memref<16xf32>) [original_read_memrefs(%arg1 : memref<16xf32>), original_write_memrefs(%arg1 : memref<16xf32>)] {amoeba.analytical_shape_orientation_fixed, cgra_count = 2 : i32, cgra_shape = "2x1"} : (memref<16xf32>, memref<16xf32>) -> (memref<16xf32>, memref<16xf32>) {
+// MATERIALIZED-NEXT:     ^bb0(%arg2: memref<16xf32>, %arg3: memref<16xf32>):
+// MATERIALIZED-NEXT:       %c0 = arith.constant 0 : index
+// MATERIALIZED-NEXT:       %c10 = arith.constant 10 : index
+// MATERIALIZED-NEXT:       %c1 = arith.constant 1 : index
+// MATERIALIZED-NEXT:       %0 = taskflow.counter from %c0 to %c10 step %c1 attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
+// MATERIALIZED-NEXT:       taskflow.yield done_reads(%arg2 : memref<16xf32>) done_writes(%arg3 : memref<16xf32>)
+// MATERIALIZED-NEXT:     }
+// MATERIALIZED-NEXT:     return
+// MATERIALIZED-NEXT:   }
+// MATERIALIZED-NEXT: }
+// MATERIALIZED-EMPTY
