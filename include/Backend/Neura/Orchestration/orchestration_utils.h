@@ -3,12 +3,17 @@
 #ifndef TASKFLOW_ORCHESTRATION_UTILS_H
 #define TASKFLOW_ORCHESTRATION_UTILS_H
 
+#include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -57,6 +62,12 @@ struct CgraShape {
 
 // Shape enumeration utilities.
 
+// Generates every rectangular shape for a CGRA count within the given grid.
+// Orders shapes deterministically by ascending rows and then columns.
+llvm::SmallVector<CgraShape>
+getRectangularShapes(int cgra_count, int grid_rows = kCgraGridRows,
+                     int grid_cols = kCgraGridCols);
+
 // Generates all placement-candidate shapes for `cgra_count` CGRAs, including
 // rotations. Rectangular shapes include both orientations (rows×cols and
 // cols×rows, deduplicated for squares). Non-rectangular shapes include all
@@ -67,6 +78,14 @@ struct CgraShape {
 //      with smaller bounding-box area as tiebreaker.
 //   2. Non-rectangular shapes (L, T, etc.) in all unique rotations.
 llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
+
+// Infers a trip count from Taskflow counter chains whose bounds and steps are
+// constant index values. Returns success(number) for a supported static chain,
+// success(std::nullopt) when the task has no Taskflow counter, and failure for
+// non-constant, malformed, or overflowing counters. It never substitutes a
+// guessed count.
+FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
+                                                           std::string &error);
 
 // Global placement feasibility.
 
