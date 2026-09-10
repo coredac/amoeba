@@ -11,8 +11,7 @@ def ConvertTaskflowToNeura : Pass<"convert-taskflow-to-neura", "ModuleOp"> {
     Converts taskflow.hyperblock operations and their counters into
     neura.kernel operations suitable for CGRA tile-array mapping.
   }];
-  let constructor =
-      "::mlir::amoeba::neura::createConvertTaskflowToNeuraPass()";
+  let constructor = "::mlir::amoeba::neura::createConvertTaskflowToNeuraPass()";
   let dependentDialects = ["mlir::taskflow::TaskflowDialect",
                            "mlir::neura::NeuraDialect",
                            "mlir::affine::AffineDialect"];
@@ -36,8 +35,7 @@ def ClassifyTaskAndCounter : Pass<"classify-task-and-counter", "ModuleOp"> {
     Annotates taskflow.task and taskflow.counter operations with the
     structural and runtime-management information consumed by Neura.
   }];
-  let constructor =
-      "::mlir::amoeba::neura::createClassifyTaskAndCounterPass()";
+  let constructor = "::mlir::amoeba::neura::createClassifyTaskAndCounterPass()";
   let dependentDialects = ["mlir::affine::AffineDialect",
                            "mlir::arith::ArithDialect",
                            "mlir::func::FuncDialect",
@@ -62,6 +60,35 @@ def OrchestrateTasksOnAccelerators
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
 
+def EnumerateAnalyticalTaskCandidates
+    : Pass<"enumerate-analytical-task-candidates", "ModuleOp"> {
+  let summary = "Freeze all concurrently packable static task shapes";
+  let description = [{
+    Enumerates every ordered assignment of fixed-orientation rectangular
+    per-task CGRA shapes that admits a simultaneous, non-overlapping placement
+    on the physical multi-CGRA grid, then writes a JSONL manifest. Exact
+    placement feasibility is checked with backtracking; concrete placement
+    coordinates remain a downstream heuristic choice. Constant counter chains
+    record their exact trip count, while symbol-bound chains are preserved as
+    symbol-dynamic. Counter bound information is read from the
+    `counter_dynamism` attributes produced by `classify-task-and-counter`,
+    which must run before this pass. The pass does not score candidates or
+    invoke the mapper. Fusion, fission, tiling, placement, and temporal order
+    are fixed.
+  }];
+  let options =
+      [Option<
+           "functionName", "function", "std::string", /*default=*/"\"\"",
+           "Taskflow function to process; inferred when exactly one exists.">,
+       Option<"outputFile", "output", "std::string", /*default=*/"\"\"",
+              "Path to the candidate JSONL manifest.">];
+  let constructor =
+      "::mlir::amoeba::neura::createEnumerateAnalyticalTaskCandidatesPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
 def FuseTask : Pass<"fuse-task", "func::FuncOp"> {
   let summary = "Fuse Taskflow tasks using Neura profitability metrics";
   let description = [{
@@ -69,8 +96,7 @@ def FuseTask : Pass<"fuse-task", "func::FuncOp"> {
     evaluated with Neura lowering and MII metrics.
   }];
   let constructor = "::mlir::amoeba::neura::createFuseTaskPass()";
-  let dependentDialects = ["mlir::LLVM::LLVMDialect",
-                           "mlir::func::FuncDialect",
+  let dependentDialects = ["mlir::LLVM::LLVMDialect", "mlir::func::FuncDialect",
                            "mlir::arith::ArithDialect",
                            "mlir::memref::MemRefDialect",
                            "mlir::neura::NeuraDialect",

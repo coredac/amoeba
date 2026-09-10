@@ -3,12 +3,17 @@
 #ifndef TASKFLOW_ORCHESTRATION_UTILS_H
 #define TASKFLOW_ORCHESTRATION_UTILS_H
 
+#include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -42,7 +47,9 @@ struct CgraShape {
   // equals cgra_count; for non-rectangular shapes it is larger than cgra_count
   // (some cells in the bbox are unoccupied).  Used only for shape sorting
   // (prefer smaller bounding boxes), not for counting occupied CGRAs.
-  int area() const { return rows * cols; }
+  int area() const {
+    return rows * cols;
+  }
 
   // Returns a human-readable description for log messages only (not IR).
   std::string describe(int cgra_count) const;
@@ -57,30 +64,38 @@ struct CgraShape {
 
 // Shape enumeration utilities.
 
-// Generates all placement-candidate shapes for `cgra_count` CGRAs, including
-// rotations. Rectangular shapes include both orientations (rows×cols and
-// cols×rows, deduplicated for squares). Non-rectangular shapes include all
-// four 90° rotations.
-//
-// Ordering (tried first to last):
-//   1. Rectangular shapes, sorted by squareness (e.g. 2×2 before 1×4),
-//      with smaller bounding-box area as tiebreaker.
-//   2. Non-rectangular shapes (L, T, etc.) in all unique rotations.
-llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
+// Generates every rectangular shape for a CGRA count within the given grid.
+// Orders shapes deterministically by ascending rows and then columns.
+llvm::SmallVector<CgraShape>
+getRectangularShapes(int cgra_count, int grid_rows = kCgraGridRows,
+                     int grid_cols = kCgraGridCols);
+
+// Infers a trip count from Taskflow counter chains whose bounds and steps are
+// constant index values. Counts multiply along each root-to-leaf chain;
+// concurrent sibling chains and independent roots use the maximum. Returns
+// success(number) for supported static chains, success(std::nullopt) when the
+// task has no Taskflow counter, and failure for non-constant, malformed, or
+// overflowing counters. It never substitutes a guessed count.
+FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
+                                                           std::string &error);
 
 // Global placement feasibility.
 
-// Simulates greedy placement of all tasks' shapes on the kCgraGridRows x
-// kCgraGridCols grid to verify that they physically fit without overlap.
+// Checks by exhaustive backtracking whether the fixed, oriented task shapes
+// can be placed simultaneously without overlap. The grid dimensions are
+// explicit so callers can use the active architecture.
+bool canShapesFitOnGrid(llvm::ArrayRef<CgraShape> task_shapes, int grid_rows,
+                        int grid_cols);
+
+// Checks by exhaustive backtracking whether one shape choice for each task can
+// be placed simultaneously on the default grid.
 //
-// For each task, all valid shapes (including rotations) are tried. Rectangular
-// shapes prefer square-like orientations (e.g. 2x2 over 1x4). Non-rectangular
-// shapes are tried in all four 90 degree rotations.
+// Each task is specified by its CGRA count. Every rectangular orientation for
+// that count is considered.
 //
 // `task_cgra_counts` contains the cgra_count for every task in the graph
 // (including the speculatively modified one).
 //
-// Returns true if all tasks can be placed without overlap.
 bool canAllTasksFitOnGrid(llvm::ArrayRef<int> task_cgra_counts);
 
 // Task scheduling utilities.

@@ -1,0 +1,466 @@
+//===- AnalyticalTaskCandidateSpace.cpp -------------------------------===//
+//
+// Implements construction and traversal of the static rectangular
+// task-shape candidate space.
+//
+//===----------------------------------------------------------------------===//
+
+#include "AnalyticalTaskCandidateSpace.h"
+
+#include "Backend/Neura/NeuraBackendOptions.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
+
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/SymbolTable.h"
+
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSet.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/SHA256.h"
+
+#include <algorithm>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <system_error>
+#include <utility>
+
+using namespace mlir;
+using namespace mlir::taskflow;
+
+namespace mlir {
+namespace amoeba {
+namespace neura {
+namespace analytical_dse {
+
+// Returns a lowercase SHA-256. File hashes use raw bytes so any input change
+// invalidates a manifest produced from those bytes.
+static std::string sha256(StringRef bytes) {
+  llvm::SHA256 hasher;
+  hasher.update(bytes);
+  return llvm::toHex(hasher.final(), /*LowerCase=*/true);
+}
+
+// Fingerprints the exact YAML selected by --architecture-spec. Dimensions
+// alone are insufficient because two same-sized machines can have different
+// FU, memory, latency, or routing capabilities.
+FailureOr<std::string> currentArchitectureSha256(std::string &error) {
+  StringRef path = mlir::amoeba::getNeuraArchitectureSpecFile();
+  if (path.empty()) {
+    error = "analytical task DSE requires --architecture-spec";
+    return failure();
+  }
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
+      llvm::MemoryBuffer::getFile(path);
+  if (!buffer) {
+    error = "cannot fingerprint architecture specification " + path.str() +
+            ": " + buffer.getError().message();
+    return failure();
+  }
+  return sha256((*buffer)->getBuffer());
+}
+
+// Converts the physical CGRA rectangle into the string stored in the
+// Taskflow `cgra_shape` attribute, such as `1x2`.
+std::string RectShape::toCgraShapeAttrValue() const {
+  return std::to_string(rows) + "x" + std::to_string(cols);
+}
+
+// Reads the bound classification produced by classify-task-and-counter.
+// Returns whether the task has a symbol-bound counter. Runtime-dynamic bounds
+// remain unsupported because they can change while the task is executing.
+static FailureOr<bool> hasSymbolBoundTripCount(TaskflowTaskOp task,
+                                               std::string &error) {
+  bool sawSymbolBound = false;
+  WalkResult result = task.walk([&](TaskflowCounterOp counter) {
+    std::optional<StringRef> dynamism = counter.getCounterDynamism();
+    if (!dynamism) {
+      error = "task " + task.getTaskName().str() +
+              " has an unclassified counter; run "
+              "'classify-task-and-counter' before "
+              "'enumerate-analytical-task-candidates'";
+      return WalkResult::interrupt();
+    }
+    if (*dynamism == "symbol_bound") {
+      sawSymbolBound = true;
+      return WalkResult::advance();
+    }
+    if (*dynamism == "dynamic_bound") {
+      error = "task " + task.getTaskName().str() +
+              " has a counter bound that is not constant or symbol-bound";
+      return WalkResult::interrupt();
+    }
+    if (*dynamism != "constant_bound") {
+      error = "task " + task.getTaskName().str() +
+              " has unknown counter_dynamism '" + dynamism->str() + "'";
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  if (result.wasInterrupted()) {
+    return failure();
+  }
+  return sawSymbolBound;
+}
+
+// Resolves any compile-time trip count stored with each task. An explicit
+// `trip_count` is authoritative; otherwise, constant Taskflow counter chains
+// supply the count. Symbol-bound chains deliberately return nullopt instead of
+// inventing a numeric value. A task without a counter represents one execution.
+static FailureOr<std::optional<int64_t>>
+resolveAnalyticalTripCount(TaskflowTaskOp task, std::string &error) {
+  FailureOr<bool> hasSymbolBound = hasSymbolBoundTripCount(task, error);
+  if (failed(hasSymbolBound)) {
+    return failure();
+  }
+  if (auto attr = task->getAttrOfType<IntegerAttr>("trip_count")) {
+    if (attr.getInt() <= 0) {
+      error =
+          "task " + task.getTaskName().str() + " has non-positive trip_count";
+      return failure();
+    }
+    return std::optional<int64_t>{attr.getInt()};
+  }
+  FailureOr<std::optional<int64_t>> inferred =
+      inferStaticTaskTripCount(task, error);
+  if (succeeded(inferred)) {
+    return std::optional<int64_t>{inferred->value_or(1)};
+  }
+
+  if (*hasSymbolBound) {
+    error.clear();
+    return std::optional<int64_t>{};
+  }
+  if (error.empty()) {
+    error = "task " + task.getTaskName().str() +
+            " has an unsupported non-constant counter chain";
+  }
+  return failure();
+}
+
+// Produces a stable identity for the current task computation. We deliberately
+// remove DSE outputs and measurements so materializing a shape does not make
+// an otherwise identical task look new. A body edit, however, changes this
+// hash and invalidates an old candidate manifest.
+static std::string taskBodySha256(TaskflowTaskOp task) {
+  Operation *clone = task->clone();
+  auto destroyClone = llvm::make_scope_exit([&] { clone->destroy(); });
+  clone->setAttr("task_name",
+                 StringAttr::get(task.getContext(), "__analytical_task__"));
+  for (StringRef attribute :
+       {"trip_count", "cgra_count", "cgra_shape", "compiled_ii", "profile_info",
+        "task_orchestration_info", "replicas", "tiling", "est_latency"})
+    clone->removeAttr(attribute);
+  clone->removeAttr("amoeba.analytical_shape_orientation_fixed");
+  // This attribute is an exported copy of the hash being computed. Excluding
+  // it keeps the identity stable when an already-bound IR is enumerated again.
+  clone->removeAttr(kSourceTaskBodyShaAttr);
+  std::string printed;
+  llvm::raw_string_ostream stream(printed);
+  OpPrintingFlags flags;
+  flags.printGenericOpForm().useLocalScope();
+  clone->print(stream, flags);
+  stream.flush();
+  return sha256(printed);
+}
+
+// Collects task names, operations, and available trip counts in walk order.
+// The order is the task axis used by shape-tuple enumeration, so duplicate
+// names are rejected before they can make candidate records ambiguous.
+FailureOr<SmallVector<TaskFact>>
+collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
+  SmallVector<TaskFact> tasks;
+  llvm::StringSet<> names;
+  WalkResult walkResult = func.walk([&](TaskflowTaskOp task) {
+    std::string name = task.getTaskName().str();
+    if (!names.insert(name).second) {
+      error = "duplicate task name " + name;
+      return WalkResult::interrupt();
+    }
+    FailureOr<std::optional<int64_t>> tripCount =
+        resolveAnalyticalTripCount(task, error);
+    if (failed(tripCount))
+      return WalkResult::interrupt();
+    tasks.push_back({task, std::move(name), taskBodySha256(task), *tripCount});
+    return WalkResult::advance();
+  });
+  if (walkResult.wasInterrupted())
+    return failure();
+  if (tasks.empty()) {
+    error = "function contains no taskflow.task operations";
+    return failure();
+  }
+  return tasks;
+}
+
+// Enumerates every legal static physical rectangle and derives its mapper
+// dimensions from the architecture getters. The deterministic order defines
+// the mixed-radix alphabet for candidate IDs.
+// TODO: Extend the analytical candidate schema and its consumers to represent
+// non-rectangular shapes. The analytical search intentionally enumerates only
+// fixed-orientation rectangles until that contract exists end to end.
+SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
+                                                 int64_t gridCols,
+                                                 int64_t perCgraRows,
+                                                 int64_t perCgraCols) {
+  // The candidate domain contains only concrete integer rectangles.
+  SmallVector<RectShape> result;
+  if (gridRows <= 0 || gridCols <= 0 || perCgraRows <= 0 || perCgraCols <= 0)
+    return result;
+
+  const int64_t gridSize =
+      gridRows > std::numeric_limits<int64_t>::max() / gridCols
+          ? std::numeric_limits<int64_t>::max()
+          : gridRows * gridCols;
+  for (int64_t count = 1; count <= gridSize; ++count) {
+    for (const CgraShape &physicalShape : taskflow::getRectangularShapes(
+             static_cast<int>(count), static_cast<int>(gridRows),
+             static_cast<int>(gridCols))) {
+      if (physicalShape.rows >
+              std::numeric_limits<int64_t>::max() / perCgraRows ||
+          physicalShape.cols >
+              std::numeric_limits<int64_t>::max() / perCgraCols)
+        continue;
+      int64_t mapperRows = physicalShape.rows * perCgraRows;
+      int64_t mapperCols = physicalShape.cols * perCgraCols;
+      result.push_back(
+          {physicalShape.rows, physicalShape.cols, mapperRows, mapperCols});
+    }
+  }
+  return result;
+}
+
+bool ConcurrentPackingCache::canPack(ArrayRef<RectShape> shapes) {
+  Key key;
+  key.reserve(shapes.size());
+  for (const RectShape &shape : shapes)
+    key.push_back({shape.rows, shape.cols});
+  llvm::sort(key, [](const auto &lhs, const auto &rhs) {
+    const int64_t lhsArea = lhs.first * lhs.second;
+    const int64_t rhsArea = rhs.first * rhs.second;
+    if (lhsArea != rhsArea)
+      return lhsArea > rhsArea;
+    if (std::max(lhs.first, lhs.second) != std::max(rhs.first, rhs.second))
+      return std::max(lhs.first, lhs.second) > std::max(rhs.first, rhs.second);
+    return lhs > rhs;
+  });
+
+  auto found = results_.find(key);
+  if (found != results_.end())
+    return found->second;
+
+  bool result = false;
+  if (gridRows_ > 0 && gridCols_ > 0 &&
+      gridRows_ <= std::numeric_limits<int>::max() &&
+      gridCols_ <= std::numeric_limits<int>::max()) {
+    SmallVector<CgraShape> fixedShapes;
+    fixedShapes.reserve(shapes.size());
+    bool dimensionsFit = true;
+    for (const RectShape &shape : shapes) {
+      if (shape.rows <= 0 || shape.cols <= 0 ||
+          shape.rows > std::numeric_limits<int>::max() ||
+          shape.cols > std::numeric_limits<int>::max()) {
+        dimensionsFit = false;
+        break;
+      }
+      fixedShapes.push_back({static_cast<int>(shape.rows),
+                             static_cast<int>(shape.cols),
+                             true,
+                             {}});
+    }
+    if (dimensionsFit)
+      result = canShapesFitOnGrid(fixedShapes, static_cast<int>(gridRows_),
+                                  static_cast<int>(gridCols_));
+  }
+  results_.emplace(std::move(key), result);
+  return result;
+}
+
+bool visitConcurrentlyPackableShapeTuples(size_t taskCount,
+                                          ArrayRef<RectShape> shapes,
+                                          ConcurrentPackingCache &packing,
+                                          ShapeIndexTupleConsumer consume) {
+  const int64_t gridRows = packing.gridRows();
+  const int64_t gridCols = packing.gridCols();
+  if (taskCount == 0 || shapes.empty() || gridRows <= 0 || gridCols <= 0 ||
+      gridRows > std::numeric_limits<int64_t>::max() / gridCols)
+    return true;
+  const int64_t gridArea = gridRows * gridCols;
+  // Every supported task consumes at least one physical CGRA. This prevents a
+  // large task list from expanding an obviously empty Cartesian product.
+  if (taskCount > static_cast<size_t>(gridArea))
+    return true;
+
+  SmallVector<size_t> selectedIndices;
+  SmallVector<RectShape> selectedShapes;
+  uint64_t validIndex = 0;
+  std::function<bool(size_t, int64_t)> visit = [&](size_t taskIndex,
+                                                   int64_t selectedArea) {
+    if (taskIndex == taskCount) {
+      if (!packing.canPack(selectedShapes))
+        return true;
+      if (!consume(validIndex, selectedIndices))
+        return false;
+      ++validIndex;
+      return true;
+    }
+
+    // Shapes remain in their declared deterministic order. The area test
+    // removes only tuples that cannot possibly fit; geometry is checked
+    // exactly after one shape has been chosen for every task.
+    for (auto [shapeIndex, shape] : llvm::enumerate(shapes)) {
+      const int64_t area = shape.cgraCount();
+      if (area <= 0 || area > gridArea - selectedArea)
+        continue;
+      selectedIndices.push_back(shapeIndex);
+      selectedShapes.push_back(shape);
+      if (!visit(taskIndex + 1, selectedArea + area))
+        return false;
+      selectedShapes.pop_back();
+      selectedIndices.pop_back();
+    }
+    return true;
+  };
+  return visit(0, 0);
+}
+
+// Formats the deterministic candidate ID assigned by enumeration. For
+// example, the first candidate is `candidate-0`, and the next is
+// `candidate-1`. The numeric suffix indexes only concurrently packable tuples,
+// so IDs stay contiguous after impossible shape assignments are removed.
+std::string makeSequentialCandidateId(uint64_t index) {
+  return "candidate-" + std::to_string(index);
+}
+
+// Serializes the shape fields used by candidate records. The explicit tile
+// dimensions are the only mapper-shape truth; a `rect-4x8` string is produced
+// only for diagnostics when needed.
+static llvm::json::Object shapeJson(const RectShape &shape) {
+  llvm::json::Object object;
+  object["kind"] = "rect";
+  object["rows"] = shape.rows;
+  object["cols"] = shape.cols;
+  object["cgra_count"] = shape.cgraCount();
+  object["cgra_shape"] = shape.toCgraShapeAttrValue();
+  object["mapper_tile_rows"] = shape.mapperRows;
+  object["mapper_tile_cols"] = shape.mapperCols;
+  return object;
+}
+
+// Serializes one candidate while preserving task order. The candidate ID is a
+// sequential index, so no task-body identity or file-derived metadata is
+// required to interpret it within its validated manifest.
+llvm::json::Object candidateJson(const Candidate &candidate) {
+  llvm::json::Array choices;
+  for (const TaskShapeChoice &choice : candidate.choices) {
+    llvm::json::Object record;
+    record["task"] = choice.task;
+    if (choice.tripCount)
+      record["trip_count"] = *choice.tripCount;
+    else
+      record["trip_count_kind"] = kSymbolDynamicTripCountKind.str();
+    record["shape"] = shapeJson(choice.shape);
+    choices.push_back(std::move(record));
+  }
+  llvm::json::Object record;
+  record["record_type"] = "candidate";
+  record["schema"] = kCandidateSchema.str();
+  record["candidate_id"] = candidate.id;
+  record["task_shapes"] = std::move(choices);
+  return record;
+}
+
+// Writes one JSON object as a single JSONL record.
+void writeJsonLine(llvm::raw_ostream &os, llvm::json::Object object) {
+  os << llvm::json::Value(std::move(object)) << "\n";
+}
+
+// Publishes a complete output atomically so consumers never read a partial
+// candidate manifest.
+bool writeAtomically(StringRef output,
+                     llvm::function_ref<bool(llvm::raw_ostream &)> writeBody,
+                     std::string &error) {
+  if (output.empty()) {
+    error = "output path is required";
+    return false;
+  }
+  SmallString<256> pattern(output);
+  pattern += ".tmp-%%%%%%";
+  SmallString<256> temporary;
+  int descriptor = -1;
+  std::error_code ec =
+      llvm::sys::fs::createUniqueFile(pattern, descriptor, temporary);
+  if (ec) {
+    error = "cannot create temporary output " + temporary.str().str() + ": " +
+            ec.message();
+    return false;
+  }
+
+  bool ok = false;
+  {
+    llvm::raw_fd_ostream os(descriptor, /*shouldClose=*/true);
+    ok = writeBody(os);
+    os.flush();
+    if (os.has_error()) {
+      error = "failed while writing " + output.str();
+      ok = false;
+    }
+  }
+  if (!ok) {
+    llvm::sys::fs::remove(temporary);
+    return false;
+  }
+  ec = llvm::sys::fs::rename(temporary, output);
+  if (ec) {
+    error = "cannot publish " + output.str() + ": " + ec.message();
+    llvm::sys::fs::remove(temporary);
+    return false;
+  }
+  return true;
+}
+
+// Selects the requested Taskflow function, or infers it when exactly one
+// function contains tasks. This keeps every file-producing pass consistent.
+FailureOr<func::FuncOp> selectTaskFunction(ModuleOp module, StringRef requested,
+                                           std::string &error) {
+  if (!requested.empty()) {
+    auto function = module.lookupSymbol<func::FuncOp>(requested);
+    if (!function) {
+      error = "requested function " + requested.str() + " does not exist";
+      return failure();
+    }
+    bool hasTask = false;
+    function.walk([&](TaskflowTaskOp) { hasTask = true; });
+    if (!hasTask) {
+      error = "requested function " + requested.str() +
+              " contains no taskflow.task operations";
+      return failure();
+    }
+    return function;
+  }
+
+  SmallVector<func::FuncOp> taskFunctions;
+  for (func::FuncOp function : module.getOps<func::FuncOp>()) {
+    bool hasTask = false;
+    function.walk([&](TaskflowTaskOp) { hasTask = true; });
+    if (hasTask)
+      taskFunctions.push_back(function);
+  }
+  if (taskFunctions.size() != 1) {
+    error = "expected exactly one function containing Taskflow tasks; use the "
+            "function option when the module contains more than one";
+    return failure();
+  }
+  return taskFunctions.front();
+}
+
+} // namespace analytical_dse
+} // namespace neura
+} // namespace amoeba
+} // namespace mlir

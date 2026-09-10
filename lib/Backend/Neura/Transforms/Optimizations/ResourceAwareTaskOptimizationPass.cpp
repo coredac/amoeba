@@ -13,9 +13,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Backend/Neura/NeuraBackendPasses.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "NeuraDialect/Architecture/Architecture.h"
 #include "NeuraDialect/Mapping/mapping_util.h"
@@ -61,99 +62,13 @@ constexpr int64_t kUnprofiled = 0;
 // CGRA Shape Utilities
 //===----------------------------------------------------------------------===//
 
-// Represents a CGRA allocation shape on the grid.
-//
-// For rectangular shapes: rows × cols == cgra_count, and `cgra_positions`
-// is empty (all cells in the bounding box are used).
-//
-// For non-rectangular shapes (L, T): `cgra_positions` stores the explicit
-// (col, row) coordinates of the occupied CGRAs.  `rows`/`cols` give the
-// bounding box so that tile-level x_tiles/y_tiles can be computed.
-struct CgraShape {
-  int rows;            // Bounding-box CGRA rows.
-  int cols;            // Bounding-box CGRA columns.
-  bool is_rectangular; // True if all cells in the bbox are used.
-  // Explicit CGRA positions for non-rectangular shapes.
-  // Each pair is (col, row) in CGRA coordinates.  Empty for rectangles.
-  SmallVector<std::pair<int, int>> cgra_positions;
-
-  int area() const { return rows * cols; }
-
-  // Returns a human-readable description for log messages only (not IR).
-  std::string describe(int cgra_count) const {
-    std::string s = std::to_string(rows) + "x" + std::to_string(cols);
-    if (!is_rectangular) {
-      s += "(non-rect, " + std::to_string(cgra_count) + " CGRAs:";
-      for (auto &[c, r] : cgra_positions)
-        s += " (" + std::to_string(c) + "," + std::to_string(r) + ")";
-      s += ")";
-    }
-    return s;
-  }
-
-  // Returns the shape string written into the IR cgra_shape attribute.
-  // For rectangular shapes: "NxM" (e.g. "2x2").
-  // For non-rectangular shapes: "NxM[(c0,r0)(c1,r1)...]" listing only the
-  // occupied CGRA positions so that downstream passes can reconstruct the
-  // exact valid tile set for multi-CGRA mapping.
-  std::string irAttr() const {
-    std::string s = std::to_string(rows) + "x" + std::to_string(cols);
-    if (!is_rectangular && !cgra_positions.empty()) {
-      s += "[";
-      for (auto &[c, r] : cgra_positions)
-        s += "(" + std::to_string(c) + "," + std::to_string(r) + ")";
-      s += "]";
-    }
-    return s;
-  }
-};
-
-// Returns all valid rectangular shapes for `cgra_count` CGRAs.
-static SmallVector<CgraShape> getRectangularShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes;
-  for (int r = 1; r <= kCgraGridRows; ++r) {
-    for (int c = 1; c <= kCgraGridCols; ++c) {
-      if (r * c == cgra_count) {
-        shapes.push_back(
-            {r, c, /*is_rectangular=*/true, /*cgra_positions=*/{}});
-      }
-    }
-  }
-  return shapes;
-}
-
 // Returns true if `cgra_count` CGRAs can fit on the grid and does not
 // exceed the per-task limit.
 static bool canFitOnGrid(int cgra_count) {
   return cgra_count >= 1 && cgra_count <= kMaxCgrasPerTask;
 }
 
-// Returns the set of non-rectangular shapes for `cgra_count` CGRAs.
-// Currently defined for cgra_count == 3 (L-shape) and cgra_count == 4
-// (L-shape and T-shape variants).  Each shape's coordinates are chosen
-// so the bounding box is as small as possible.
-static SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes;
-
-  if (cgra_count == 3) {
-    // L-shape 3 CGRAs: (0,0)(1,0)(0,1) — bbox 2×2
-    shapes.push_back({2, 2, false, {{0, 0}, {1, 0}, {0, 1}}});
-  }
-
-  if (cgra_count == 4) {
-    // T-shape: three in a row + one below centre
-    //   (0,0)(1,0)(2,0)(1,1)  — bbox 2×3
-    shapes.push_back({2, 3, false, {{0, 0}, {1, 0}, {2, 0}, {1, 1}}});
-
-    // L-shape: three in a column + one offset
-    //   (0,0)(0,1)(0,2)(1,2)  — bbox 3×2
-    shapes.push_back({3, 2, false, {{0, 0}, {0, 1}, {0, 2}, {1, 2}}});
-  }
-
-  return shapes;
-}
-
-// Picks the best shape for display/profiling.
+// Picks the best rectangular shape for display/profiling.
 // We prefer shapes with the most compact physical layout (smallest maximum
 // distance between nodes) to minimize communication latency. In cases of
 // identical bounding box area, we prefer more square-like bounds over long
@@ -164,21 +79,8 @@ static SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
 // legitimately deferred to the downstream orchestration pass, as speculative
 // profiling assumes unconstrained placement.
 static CgraShape pickBestShape(int cgra_count) {
-  // For cgra_count == 3, the 2x2 L-shape has a smaller maximum physical routing
-  // distance (dist=2) compared to a 1x3 rectangle (dist=3), despite having a
-  // larger bounding box. We explicitly prefer the more compact L-shape here for
-  // better speculative latency.
-  if (cgra_count == 3) {
-    auto non_rect_shapes = getNonRectangularShapes(3);
-    if (!non_rect_shapes.empty()) {
-      return non_rect_shapes.front();
-    }
-  }
-
-  SmallVector<CgraShape> candidates = getRectangularShapes(cgra_count);
-  for (const auto &s : getNonRectangularShapes(cgra_count)) {
-    candidates.push_back(s);
-  }
+  SmallVector<CgraShape> candidates =
+      getRectangularShapes(cgra_count, kCgraGridRows, kCgraGridCols);
 
   if (!candidates.empty()) {
     return *std::min_element(candidates.begin(), candidates.end(),
@@ -225,7 +127,9 @@ struct TaskGraphNode {
 
   // Returns estimated task latency using the pipelined execution model:
   //   latency = II * (trip_count - 1) + steps.
-  int64_t estimatedLatency() const { return ii * (trip_count - 1) + steps; }
+  int64_t estimatedLatency() const {
+    return ii * (trip_count - 1) + steps;
+  }
 };
 
 class TaskDependencyGraph {
@@ -721,105 +625,40 @@ private:
   // Multiple independent counter chains execute concurrently on the CGRA,
   // so the total trip count is max(chain_product) across chains.
   static int64_t computeTripCount(TaskflowTaskOp task) {
-    // Collects all taskflow.counter ops in the task body.
-    SmallVector<TaskflowCounterOp> counters;
-    for (Operation &op : task.getBody().front()) {
-      if (auto counter = dyn_cast<TaskflowCounterOp>(&op))
-        counters.push_back(counter);
+    std::string error;
+    FailureOr<std::optional<int64_t>> taskflowCount =
+        inferStaticTaskTripCount(task, error);
+    if (failed(taskflowCount)) {
+      llvm::errs() << "[computeTripCount] " << error << "\n";
+      assert(false && "Expected static Taskflow counter bounds");
+      return 1;
     }
+    if (*taskflowCount)
+      return **taskflowCount;
 
-    if (counters.empty()) {
-      // Defensive fallback: try neura.counter ops inside kernels.
-      int64_t total = 1;
-      task.walk([&](neura::KernelOp kernel) {
-        int64_t kernel_product = 1;
-        kernel.walk([&](neura::CounterOp counter_op) {
-          auto getConst = [](Value val) -> std::optional<int64_t> {
-            if (auto cst = val.getDefiningOp<neura::ConstantOp>()) {
-              return cast<IntegerAttr>(cst.getValueAttr()).getInt();
-            }
-            return std::nullopt;
-          };
-          auto lb = getConst(counter_op.getLowerBound());
-          auto ub = getConst(counter_op.getUpperBound());
-          auto st = getConst(counter_op.getStep());
-          if (lb && ub && st && *st > 0) {
-            int64_t range = *ub - *lb;
-            int64_t step = *st;
-            int64_t tc = (range + step - 1) / step;
-            if (tc > 0) {
-              kernel_product *= tc;
-            }
-          }
-          // Dynamic bounds: conservatively treated as trip_count=1 (unchanged
-          // default)
-        });
-        total = std::max(total, kernel_product);
-      });
-      return (total > 0) ? total : 1;
-    }
-
-    // Builds counter chains from taskflow.counter ops.
-    // A root counter has no parent_index. A relay/leaf counter has a
-    // parent_index that is the result of another counter.
-    // Finds root counters (no parent).
-    SmallVector<TaskflowCounterOp> roots;
-    for (auto counter : counters) {
-      if (!counter.getParentIndex())
-        roots.push_back(counter);
-    }
-
-    // Builds a map from parent counter result -> child counters.
-    DenseMap<Value, SmallVector<TaskflowCounterOp>> parent_to_children;
-    for (auto counter : counters) {
-      if (auto parent = counter.getParentIndex())
-        parent_to_children[parent].push_back(counter);
-    }
-
-    auto getConstantIndex = [](Value val) -> int64_t {
-      if (auto cst = val.getDefiningOp<arith::ConstantIndexOp>()) {
-        return cst.value();
-      } else {
-        // Unexpected dynamic bounds.
-        // TODO: support dynamic bounds if needed.
-        assert(false && "Expected constant index for counter parent_index");
-      }
-      return 0;
-    };
-    // Computes trip count for a single counter.
-    auto counterTripCount =
-        [&getConstantIndex](TaskflowCounterOp counter) -> int64_t {
-      int64_t lb = getConstantIndex(counter.getLowerBound());
-      int64_t ub = getConstantIndex(counter.getUpperBound());
-      int64_t step = getConstantIndex(counter.getStep());
-      if (step <= 0) {
-        return 1;
-      }
-      int64_t range = ub - lb;
-      return (range > 0) ? ((range + step - 1) / step) : 1;
-    };
-
-    // DFS from each root, accumulating the product along the chain.
-    // Independent chains are concurrent -> take max across chains.
+    // Falls back to Neura counters when the Taskflow layer has no counters.
     int64_t total = 1;
-    for (auto root : roots) {
-      // Follows chain: root -> children -> grandchildren ...
-      // Chain product = product of all counters in this chain.
-      int64_t chain_product = 1;
-      SmallVector<TaskflowCounterOp> worklist;
-      worklist.push_back(root);
-      while (!worklist.empty()) {
-        auto cur = worklist.pop_back_val();
-        chain_product *= counterTripCount(cur);
-        auto it = parent_to_children.find(cur.getCounterIndex());
-        if (it != parent_to_children.end()) {
-          for (auto child : it->second)
-            worklist.push_back(child);
+    task.walk([&](neura::KernelOp kernel) {
+      int64_t kernel_product = 1;
+      kernel.walk([&](neura::CounterOp counter_op) {
+        auto getConst = [](Value val) -> std::optional<int64_t> {
+          if (auto cst = val.getDefiningOp<neura::ConstantOp>())
+            return cast<IntegerAttr>(cst.getValueAttr()).getInt();
+          return std::nullopt;
+        };
+        auto lb = getConst(counter_op.getLowerBound());
+        auto ub = getConst(counter_op.getUpperBound());
+        auto st = getConst(counter_op.getStep());
+        if (lb && ub && st && *st > 0) {
+          int64_t range = *ub - *lb;
+          int64_t step = *st;
+          int64_t tc = (range + step - 1) / step;
+          if (tc > 0)
+            kernel_product *= tc;
         }
-      }
-      total = std::max(total, chain_product);
-    }
-
+      });
+      total = std::max(total, kernel_product);
+    });
     return (total > 0) ? total : 1;
   }
 };
