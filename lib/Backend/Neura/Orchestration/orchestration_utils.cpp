@@ -54,15 +54,18 @@ std::string CgraShape::irAttr() const {
 SmallVector<CgraShape> getRectangularShapes(int cgra_count, int grid_rows,
                                             int grid_cols) {
   SmallVector<CgraShape> shapes;
-  if (cgra_count <= 0 || grid_rows <= 0 || grid_cols <= 0)
+  if (cgra_count <= 0 || grid_rows <= 0 || grid_cols <= 0) {
     return shapes;
+  }
 
   for (int rows = 1; rows <= grid_rows; ++rows) {
-    if (cgra_count % rows != 0)
+    if (cgra_count % rows != 0) {
       continue;
+    }
     int cols = cgra_count / rows;
-    if (cols <= grid_cols)
+    if (cols <= grid_cols) {
       shapes.push_back({rows, cols, true, {}});
+    }
   }
   return shapes;
 }
@@ -104,8 +107,9 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
   llvm::sort(shapes, [](const CgraShape &lhs, const CgraShape &rhs) {
     int squareness_lhs = std::abs(lhs.rows - lhs.cols);
     int squareness_rhs = std::abs(rhs.rows - rhs.cols);
-    if (squareness_lhs != squareness_rhs)
+    if (squareness_lhs != squareness_rhs) {
       return squareness_lhs < squareness_rhs;
+    }
     return lhs.area() < rhs.area();
   });
 
@@ -169,8 +173,9 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
 }
 
 // Infers a static trip count from Taskflow counter chains. A constant counter
-// such as `0..10 step 3` contributes four iterations; nested counters multiply
-// their counts, while independent root chains use the maximum chain product.
+// such as `0..10 step 3` contributes four iterations. Counts multiply along
+// each root-to-leaf chain; sibling chains and independent roots use the maximum
+// chain product because they execute concurrently.
 // The result has three states: a number for a supported static counter chain,
 // nullopt when no Taskflow counter exists, and failure for non-constant,
 // malformed, or overflowing counters.
@@ -178,8 +183,9 @@ FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
                                                            std::string &error) {
   SmallVector<TaskflowCounterOp> counters;
   task.walk([&](TaskflowCounterOp counter) { counters.push_back(counter); });
-  if (counters.empty())
+  if (counters.empty()) {
     return std::optional<int64_t>{};
+  }
   if (!task.getBody().hasOneBlock()) {
     error = "task " + task.getTaskName().str() +
             " must contain exactly one block to infer a static trip count";
@@ -189,10 +195,11 @@ FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
   SmallVector<TaskflowCounterOp> roots;
   DenseMap<Value, SmallVector<TaskflowCounterOp>> children;
   for (TaskflowCounterOp counter : counters) {
-    if (Value parent = counter.getParentIndex())
+    if (Value parent = counter.getParentIndex()) {
       children[parent].push_back(counter);
-    else
+    } else {
       roots.push_back(counter);
+    }
   }
   if (roots.empty()) {
     error = "task " + task.getTaskName().str() +
@@ -201,49 +208,75 @@ FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
   }
 
   auto constantIndex = [](Value value) -> FailureOr<int64_t> {
-    if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>())
+    if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>()) {
       return constant.value();
+    }
     return failure();
   };
   auto counterTripCount = [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
     FailureOr<int64_t> lower = constantIndex(counter.getLowerBound());
     FailureOr<int64_t> upper = constantIndex(counter.getUpperBound());
     FailureOr<int64_t> step = constantIndex(counter.getStep());
-    if (failed(lower) || failed(upper) || failed(step))
+    if (failed(lower) || failed(upper) || failed(step)) {
       return failure();
+    }
     if (*step <= 0 || *upper <= *lower ||
-        (*lower < 0 && *upper > std::numeric_limits<int64_t>::max() + *lower))
+        (*lower < 0 && *upper > std::numeric_limits<int64_t>::max() + *lower)) {
       return failure();
+    }
     int64_t distance = *upper - *lower;
     return 1 + (distance - 1) / *step;
   };
 
-  int64_t total = 1;
+  DenseSet<Operation *> active;
   DenseSet<Operation *> visited;
-  for (TaskflowCounterOp root : roots) {
-    int64_t chainProduct = 1;
-    SmallVector<TaskflowCounterOp> worklist{root};
-    while (!worklist.empty()) {
-      TaskflowCounterOp counter = worklist.pop_back_val();
-      if (!visited.insert(counter.getOperation()).second) {
-        error = "task " + task.getTaskName().str() +
-                " has a cyclic or multiply referenced counter chain";
-        return failure();
-      }
-      FailureOr<int64_t> count = counterTripCount(counter);
-      if (failed(count) ||
-          chainProduct > std::numeric_limits<int64_t>::max() / *count) {
-        error = "task " + task.getTaskName().str() +
-                " requires constant counter bounds, a positive step, a "
-                "non-empty range, and a trip count within int64";
-        return failure();
-      }
-      chainProduct *= *count;
-      auto found = children.find(counter.getCounterIndex());
-      if (found != children.end())
-        worklist.append(found->second.begin(), found->second.end());
+  std::function<FailureOr<int64_t>(TaskflowCounterOp)> chainTripCount =
+      [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
+    if (!active.insert(counter.getOperation()).second ||
+        visited.contains(counter.getOperation())) {
+      error = "task " + task.getTaskName().str() +
+              " has a cyclic or multiply referenced counter chain";
+      return failure();
     }
-    total = std::max(total, chainProduct);
+
+    FailureOr<int64_t> count = counterTripCount(counter);
+    if (failed(count)) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    int64_t longestChildChain = 1;
+    auto found = children.find(counter.getCounterIndex());
+    if (found != children.end()) {
+      for (TaskflowCounterOp child : found->second) {
+        FailureOr<int64_t> childCount = chainTripCount(child);
+        if (failed(childCount)) {
+          return failure();
+        }
+        longestChildChain = std::max(longestChildChain, *childCount);
+      }
+    }
+    if (*count > std::numeric_limits<int64_t>::max() / longestChildChain) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    active.erase(counter.getOperation());
+    visited.insert(counter.getOperation());
+    return *count * longestChildChain;
+  };
+
+  int64_t total = 1;
+  for (TaskflowCounterOp root : roots) {
+    FailureOr<int64_t> rootCount = chainTripCount(root);
+    if (failed(rootCount)) {
+      return failure();
+    }
+    total = std::max(total, *rootCount);
   }
   if (visited.size() != counters.size()) {
     error = "task " + task.getTaskName().str() +

@@ -80,10 +80,11 @@ getRectangularShapes(int cgra_count, int grid_rows = kCgraGridRows,
 llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
 
 // Infers a trip count from Taskflow counter chains whose bounds and steps are
-// constant index values. Returns success(number) for a supported static chain,
-// success(std::nullopt) when the task has no Taskflow counter, and failure for
-// non-constant, malformed, or overflowing counters. It never substitutes a
-// guessed count.
+// constant index values. Counts multiply along each root-to-leaf chain;
+// concurrent sibling chains and independent roots use the maximum. Returns
+// success(number) for supported static chains, success(std::nullopt) when the
+// task has no Taskflow counter, and failure for non-constant, malformed, or
+// overflowing counters. It never substitutes a guessed count.
 FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
                                                            std::string &error);
 
