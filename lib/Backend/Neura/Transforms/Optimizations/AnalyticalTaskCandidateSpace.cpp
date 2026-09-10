@@ -1,11 +1,11 @@
-//===- AnalyticalTaskDSESupport.cpp - Shared task DSE support ------------===//
+//===- AnalyticalTaskCandidateSpace.cpp -------------------------------===//
 //
-// Implements the records and file protocol shared by the static analytical
-// task-DSE passes.
+// Implements construction and traversal of the static rectangular
+// task-shape candidate space.
 //
 //===----------------------------------------------------------------------===//
 
-#include "AnalyticalTaskDSESupport.h"
+#include "AnalyticalTaskCandidateSpace.h"
 
 #include "Backend/Neura/NeuraBackendOptions.h"
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
@@ -72,26 +72,76 @@ std::string RectShape::toCgraShapeAttrValue() const {
   return std::to_string(rows) + "x" + std::to_string(cols);
 }
 
-// Resolves the positive static trip count stored with each task. An explicit
-// `trip_count` is authoritative; otherwise, constant Taskflow counter bounds
-// supply the count. A task without a counter represents one execution.
-static FailureOr<int64_t> resolveAnalyticalTripCount(TaskflowTaskOp task,
-                                                     std::string &error) {
+// Reads the bound classification produced by classify-task-and-counter.
+// Returns whether the task has a symbol-bound counter. Runtime-dynamic bounds
+// remain unsupported because they can change while the task is executing.
+static FailureOr<bool> hasSymbolBoundTripCount(TaskflowTaskOp task,
+                                               std::string &error) {
+  bool sawSymbolBound = false;
+  WalkResult result = task.walk([&](TaskflowCounterOp counter) {
+    std::optional<StringRef> dynamism = counter.getCounterDynamism();
+    if (!dynamism) {
+      error = "task " + task.getTaskName().str() +
+              " has an unclassified counter; run "
+              "'classify-task-and-counter' before "
+              "'enumerate-analytical-task-candidates'";
+      return WalkResult::interrupt();
+    }
+    if (*dynamism == "symbol_bound") {
+      sawSymbolBound = true;
+      return WalkResult::advance();
+    }
+    if (*dynamism == "dynamic_bound") {
+      error = "task " + task.getTaskName().str() +
+              " has a counter bound that is not constant or symbol-bound";
+      return WalkResult::interrupt();
+    }
+    if (*dynamism != "constant_bound") {
+      error = "task " + task.getTaskName().str() +
+              " has unknown counter_dynamism '" + dynamism->str() + "'";
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  if (result.wasInterrupted()) {
+    return failure();
+  }
+  return sawSymbolBound;
+}
+
+// Resolves any compile-time trip count stored with each task. An explicit
+// `trip_count` is authoritative; otherwise, constant Taskflow counter chains
+// supply the count. Symbol-bound chains deliberately return nullopt instead of
+// inventing a numeric value. A task without a counter represents one execution.
+static FailureOr<std::optional<int64_t>>
+resolveAnalyticalTripCount(TaskflowTaskOp task, std::string &error) {
+  FailureOr<bool> hasSymbolBound = hasSymbolBoundTripCount(task, error);
+  if (failed(hasSymbolBound)) {
+    return failure();
+  }
   if (auto attr = task->getAttrOfType<IntegerAttr>("trip_count")) {
     if (attr.getInt() <= 0) {
       error =
           "task " + task.getTaskName().str() + " has non-positive trip_count";
       return failure();
     }
-    return attr.getInt();
+    return std::optional<int64_t>{attr.getInt()};
   }
   FailureOr<std::optional<int64_t>> inferred =
       inferStaticTaskTripCount(task, error);
-  if (failed(inferred)) {
-    error += "; static shape selection requires constant counter bounds";
-    return failure();
+  if (succeeded(inferred)) {
+    return std::optional<int64_t>{inferred->value_or(1)};
   }
-  return inferred->value_or(1);
+
+  if (*hasSymbolBound) {
+    error.clear();
+    return std::optional<int64_t>{};
+  }
+  if (error.empty()) {
+    error = "task " + task.getTaskName().str() +
+            " has an unsupported non-constant counter chain";
+  }
+  return failure();
 }
 
 // Produces a stable identity for the current task computation. We deliberately
@@ -120,9 +170,9 @@ static std::string taskBodySha256(TaskflowTaskOp task) {
   return sha256(printed);
 }
 
-// Collects task names, operations, and static trip counts in walk order. The
-// order is the task axis used by shape-tuple enumeration, so duplicate names
-// are rejected before they can make candidate records ambiguous.
+// Collects task names, operations, and available trip counts in walk order.
+// The order is the task axis used by shape-tuple enumeration, so duplicate
+// names are rejected before they can make candidate records ambiguous.
 FailureOr<SmallVector<TaskFact>>
 collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
   SmallVector<TaskFact> tasks;
@@ -133,7 +183,8 @@ collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
       error = "duplicate task name " + name;
       return WalkResult::interrupt();
     }
-    FailureOr<int64_t> tripCount = resolveAnalyticalTripCount(task, error);
+    FailureOr<std::optional<int64_t>> tripCount =
+        resolveAnalyticalTripCount(task, error);
     if (failed(tripCount))
       return WalkResult::interrupt();
     tasks.push_back({task, std::move(name), taskBodySha256(task), *tripCount});
@@ -310,7 +361,10 @@ llvm::json::Object candidateJson(const Candidate &candidate) {
   for (const TaskShapeChoice &choice : candidate.choices) {
     llvm::json::Object record;
     record["task"] = choice.task;
-    record["trip_count"] = choice.tripCount;
+    if (choice.tripCount)
+      record["trip_count"] = *choice.tripCount;
+    else
+      record["trip_count_kind"] = kSymbolDynamicTripCountKind.str();
     record["shape"] = shapeJson(choice.shape);
     choices.push_back(std::move(record));
   }

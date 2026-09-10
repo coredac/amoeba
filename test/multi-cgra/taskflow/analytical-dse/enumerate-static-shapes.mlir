@@ -3,9 +3,11 @@
 // 156 candidates.
 
 // RUN: mlir-amoeba-opt %s \
+// RUN:   --classify-task-and-counter \
 // RUN:   '--enumerate-analytical-task-candidates=output=%t.candidates.jsonl' \
 // RUN:   --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
-// RUN:   -o %t.bound.mlir
+// RUN:   --mlir-print-op-on-diagnostic=false -o %t.bound.mlir > %t.program 2>&1
+// RUN: FileCheck %s --input-file=%t.program --check-prefix=PROGRAM
 // RUN: FileCheck %s --input-file=%t.candidates.jsonl --check-prefix=CANDIDATES
 // RUN: FileCheck %s --input-file=%t.bound.mlir --check-prefix=BOUND
 
@@ -45,7 +47,7 @@ module {
   }
 }
 
-// CANDIDATES-LABEL: {"architecture":{"grid_cols":4,"grid_rows":4,"per_cgra_tile_cols":4,"per_cgra_tile_rows":4,"spec_sha256":"1b96d6d3741805b057add7db66296c9c73cc45ea4ef0263e0eea5adb4f4360d6"},"cost_queries":[{"mapper_tile_cols":4,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":16,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":16,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":16,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":16,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":16,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":16,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":4,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":4,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":16,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":4,"mapper_tile_rows":16,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":16,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":16,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":16,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":16,"task":"B"}],"fixed_axes":{"communication":"not-scored","fission":"factor-1","fusion":"identity","placement":"exact-fit-required-coordinates-downstream-heuristic","temporal_order":"downstream-heuristic","tiling":"factor-1"},"function":"main","record_type":"header","schema":"amoeba-analytical-task-candidates","search_scope":"static-shape-concurrent-fit","shape_policy":"static-oriented-rectangles","spatial_capacity_policy":"all-tasks-simultaneous-exact-pack","tasks":[{"body_sha256":"f4e821880514d53c4c0fdd5866807dca5eeb44b23220207881ad7846ef3308fe","task":"A","trip_count":10},{"body_sha256":"f4e821880514d53c4c0fdd5866807dca5eeb44b23220207881ad7846ef3308fe","task":"B","trip_count":10}]}
+// CANDIDATES-LABEL: {"architecture":{"grid_cols":4,"grid_rows":4,"per_cgra_tile_cols":4,"per_cgra_tile_rows":4,"spec_sha256":"1b96d6d3741805b057add7db66296c9c73cc45ea4ef0263e0eea5adb4f4360d6"},"cost_queries":[{"mapper_tile_cols":4,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":16,"mapper_tile_rows":4,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":16,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":16,"mapper_tile_rows":8,"task":"A"},{"mapper_tile_cols":8,"mapper_tile_rows":16,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":16,"mapper_tile_rows":12,"task":"A"},{"mapper_tile_cols":12,"mapper_tile_rows":16,"task":"A"},{"mapper_tile_cols":4,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":4,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":4,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":16,"mapper_tile_rows":4,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":4,"mapper_tile_rows":16,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":16,"mapper_tile_rows":8,"task":"B"},{"mapper_tile_cols":8,"mapper_tile_rows":16,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":16,"mapper_tile_rows":12,"task":"B"},{"mapper_tile_cols":12,"mapper_tile_rows":16,"task":"B"}],"fixed_axes":{"communication":"not-scored","fission":"factor-1","fusion":"identity","placement":"exact-fit-required-coordinates-downstream-heuristic","temporal_order":"downstream-heuristic","tiling":"factor-1"},"function":"main","record_type":"header","schema":"amoeba-analytical-task-candidates","search_scope":"static-shape-concurrent-fit","shape_policy":"static-oriented-rectangles","spatial_capacity_policy":"all-tasks-simultaneous-exact-pack","tasks":[{"body_sha256":"7f77f1dcd7fa4716eb9974bb450d17c5ca8e1f1a9718c8abcf0689b16a1b81df","task":"A","trip_count":10},{"body_sha256":"7f77f1dcd7fa4716eb9974bb450d17c5ca8e1f1a9718c8abcf0689b16a1b81df","task":"B","trip_count":10}]}
 // CANDIDATES-NEXT: {"candidate_id":"candidate-0","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"A","trip_count":10},{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"B","trip_count":10}]}
 // CANDIDATES-NEXT: {"candidate_id":"candidate-1","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"A","trip_count":10},{"shape":{"cgra_count":2,"cgra_shape":"1x2","cols":2,"kind":"rect","mapper_tile_cols":8,"mapper_tile_rows":4,"rows":1},"task":"B","trip_count":10}]}
 // CANDIDATES-NEXT: {"candidate_id":"candidate-2","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"A","trip_count":10},{"shape":{"cgra_count":2,"cgra_shape":"2x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":8,"rows":2},"task":"B","trip_count":10}]}
@@ -205,22 +207,26 @@ module {
 // CANDIDATES-NEXT: {"candidate_count":156,"record_type":"footer","schema":"amoeba-analytical-task-candidates"}
 // BOUND-LABEL: module {
 // BOUND-NEXT:   func.func @main(%arg0: memref<16xf32>, %arg1: memref<16xf32>) {
-// BOUND-NEXT:     %done_reads, %done_writes = taskflow.task @A will_reads(%arg0 : memref<16xf32>) will_writes(%arg0 : memref<16xf32>) [original_read_memrefs(%arg0 : memref<16xf32>), original_write_memrefs(%arg0 : memref<16xf32>)] {amoeba.source_task_body_sha256 = "f4e821880514d53c4c0fdd5866807dca5eeb44b23220207881ad7846ef3308fe"} : (memref<16xf32>, memref<16xf32>) -> (memref<16xf32>, memref<16xf32>) {
+// BOUND-NEXT:     %done_reads, %done_writes = taskflow.task @A will_reads(%arg0 : memref<16xf32>) will_writes(%arg0 : memref<16xf32>) [original_read_memrefs(%arg0 : memref<16xf32>), original_write_memrefs(%arg0 : memref<16xf32>)] {amoeba.source_task_body_sha256 = "7f77f1dcd7fa4716eb9974bb450d17c5ca8e1f1a9718c8abcf0689b16a1b81df"} : (memref<16xf32>, memref<16xf32>) -> (memref<16xf32>, memref<16xf32>) {
 // BOUND-NEXT:     ^bb0(%arg2: memref<16xf32>, %arg3: memref<16xf32>):
 // BOUND-NEXT:       %c0 = arith.constant 0 : index
 // BOUND-NEXT:       %c10 = arith.constant 10 : index
 // BOUND-NEXT:       %c1 = arith.constant 1 : index
-// BOUND-NEXT:       %0 = taskflow.counter from %c0 to %c10 step %c1 : index
+// BOUND-NEXT:       %0 = taskflow.counter from %c0 to %c10 step %c1 attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
 // BOUND-NEXT:       taskflow.yield done_reads(%arg2 : memref<16xf32>) done_writes(%arg3 : memref<16xf32>)
 // BOUND-NEXT:     }
-// BOUND-NEXT:     %done_reads_0, %done_writes_1 = taskflow.task @B will_reads(%arg1 : memref<16xf32>) will_writes(%arg1 : memref<16xf32>) [original_read_memrefs(%arg1 : memref<16xf32>), original_write_memrefs(%arg1 : memref<16xf32>)] {amoeba.source_task_body_sha256 = "f4e821880514d53c4c0fdd5866807dca5eeb44b23220207881ad7846ef3308fe"} : (memref<16xf32>, memref<16xf32>) -> (memref<16xf32>, memref<16xf32>) {
+// BOUND-NEXT:     %done_reads_0, %done_writes_1 = taskflow.task @B will_reads(%arg1 : memref<16xf32>) will_writes(%arg1 : memref<16xf32>) [original_read_memrefs(%arg1 : memref<16xf32>), original_write_memrefs(%arg1 : memref<16xf32>)] {amoeba.source_task_body_sha256 = "7f77f1dcd7fa4716eb9974bb450d17c5ca8e1f1a9718c8abcf0689b16a1b81df"} : (memref<16xf32>, memref<16xf32>) -> (memref<16xf32>, memref<16xf32>) {
 // BOUND-NEXT:     ^bb0(%arg2: memref<16xf32>, %arg3: memref<16xf32>):
 // BOUND-NEXT:       %c0 = arith.constant 0 : index
 // BOUND-NEXT:       %c10 = arith.constant 10 : index
 // BOUND-NEXT:       %c1 = arith.constant 1 : index
-// BOUND-NEXT:       %0 = taskflow.counter from %c0 to %c10 step %c1 : index
+// BOUND-NEXT:       %0 = taskflow.counter from %c0 to %c10 step %c1 attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
 // BOUND-NEXT:       taskflow.yield done_reads(%arg2 : memref<16xf32>) done_writes(%arg3 : memref<16xf32>)
 // BOUND-NEXT:     }
 // BOUND-NEXT:     return
 // BOUND-NEXT:   }
 // BOUND-NEXT: }
+
+// PROGRAM-LABEL: Unknown YAML root key: extensions
+// PROGRAM-NEXT: Unknown YAML root key: simulator
+// PROGRAM-NEXT: [AnalyticalTaskDSE] enumerated all 156 concurrently packable shape candidates into {{.*}}.candidates.jsonl

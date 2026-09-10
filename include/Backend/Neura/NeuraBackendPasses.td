@@ -68,9 +68,13 @@ def EnumerateAnalyticalTaskCandidates
     per-task CGRA shapes that admits a simultaneous, non-overlapping placement
     on the physical multi-CGRA grid, then writes a JSONL manifest. Exact
     placement feasibility is checked with backtracking; concrete placement
-    coordinates remain a downstream heuristic choice. The pass accepts only
-    static counter trip counts and does not score candidates or invoke the
-    mapper. Fusion, fission, tiling, placement, and temporal order are fixed.
+    coordinates remain a downstream heuristic choice. Constant counter chains
+    record their exact trip count, while symbol-bound chains are preserved as
+    symbol-dynamic. Counter bound information is read from the
+    `counter_dynamism` attributes produced by `classify-task-and-counter`,
+    which must run before this pass. The pass does not score candidates or
+    invoke the mapper. Fusion, fission, tiling, placement, and temporal order
+    are fixed.
   }];
   let options =
       [Option<

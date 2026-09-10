@@ -1,3 +1,2 @@
 BasedOnStyle: LLVM
-AllowShortFunctionsOnASingleLine: Empty
 LineEnding: LF

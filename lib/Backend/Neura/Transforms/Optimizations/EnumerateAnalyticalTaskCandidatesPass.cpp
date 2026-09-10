@@ -5,7 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "AnalyticalTaskDSESupport.h"
+#include "AnalyticalTaskCandidateSpace.h"
 
 #include "Backend/Neura/NeuraBackendPasses.h"
 
@@ -67,8 +67,9 @@ struct EnumerateAnalyticalTaskCandidatesPass
       return signalPassFailure();
     }
 
-    // Collects static task facts and builds the single-task shape alphabet from
-    // the architecture values read by Neura's YAML loader.
+    // Collects task facts and builds the single-task shape alphabet from the
+    // architecture values read by Neura's YAML loader. Shape enumeration does
+    // not require a numeric trip count, so symbol-dynamic tasks remain valid.
     FailureOr<SmallVector<TaskFact>> taskFacts =
         collectAnalyticalTaskFacts(func, error);
     if (failed(taskFacts)) {
@@ -141,7 +142,10 @@ struct EnumerateAnalyticalTaskCandidatesPass
             llvm::json::Object record;
             record["task"] = task.name;
             record["body_sha256"] = task.bodySha256;
-            record["trip_count"] = task.tripCount;
+            if (task.tripCount)
+              record["trip_count"] = *task.tripCount;
+            else
+              record["trip_count_kind"] = kSymbolDynamicTripCountKind.str();
             tasks.push_back(std::move(record));
           }
           llvm::json::Array costQueries;

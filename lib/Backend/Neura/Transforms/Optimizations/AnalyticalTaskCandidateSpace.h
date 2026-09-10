@@ -1,13 +1,13 @@
-//===- AnalyticalTaskDSESupport.h - Static task candidates ----*- C++ -*-===//
+//===- AnalyticalTaskCandidateSpace.h -------------------------*- C++ -*-===//
 //
-// Defines fixed-orientation rectangular candidate records and the JSONL
-// manifest writer used by static candidate enumeration. This layer owns no
-// score parsing, ranking, materialization, or mapper invocation.
+// Defines the facts, shapes, and traversal used to construct the finite
+// analytical task-shape candidate space. It also owns canonical IDs and JSON
+// serialization helpers, but no parsing, scoring, materialization, or mapping.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef AMOEBA_ANALYTICAL_TASK_DSE_SUPPORT_H
-#define AMOEBA_ANALYTICAL_TASK_DSE_SUPPORT_H
+#ifndef AMOEBA_ANALYTICAL_TASK_CANDIDATE_SPACE_H
+#define AMOEBA_ANALYTICAL_TASK_CANDIDATE_SPACE_H
 
 #include "TaskflowDialect/TaskflowOps.h"
 
@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,6 +41,8 @@ inline constexpr llvm::StringLiteral kSearchScope =
     "static-shape-concurrent-fit";
 inline constexpr llvm::StringLiteral kSpatialCapacityPolicy =
     "all-tasks-simultaneous-exact-pack";
+inline constexpr llvm::StringLiteral kSymbolDynamicTripCountKind =
+    "symbol_dynamic";
 inline constexpr llvm::StringLiteral kSourceTaskBodyShaAttr =
     "amoeba.source_task_body_sha256";
 
@@ -50,24 +53,24 @@ struct RectShape {
   int64_t mapperRows = 1;
   int64_t mapperCols = 1;
 
-  int64_t cgraCount() const {
-    return rows * cols;
-  }
+  int64_t cgraCount() const { return rows * cols; }
   std::string toCgraShapeAttrValue() const;
 };
 
-// Stores immutable identity and trip-count facts from one Taskflow task.
+// Stores immutable identity and any compile-time trip count from one Taskflow
+// task. A missing trip count denotes a symbol-bound counter chain whose value
+// is fixed before the task launches but is not known at compile time.
 struct TaskFact {
   taskflow::TaskflowTaskOp op;
   std::string name;
   std::string bodySha256;
-  int64_t tripCount = 1;
+  std::optional<int64_t> tripCount = int64_t{1};
 };
 
 // Stores one task's shape choice within a program candidate.
 struct TaskShapeChoice {
   std::string task;
-  int64_t tripCount = 1;
+  std::optional<int64_t> tripCount = int64_t{1};
   RectShape shape;
 };
 
@@ -89,12 +92,8 @@ public:
       : gridRows_(gridRows), gridCols_(gridCols) {}
 
   bool canPack(llvm::ArrayRef<RectShape> shapes);
-  int64_t gridRows() const {
-    return gridRows_;
-  }
-  int64_t gridCols() const {
-    return gridCols_;
-  }
+  int64_t gridRows() const { return gridRows_; }
+  int64_t gridCols() const { return gridCols_; }
 
 private:
   using Key = std::vector<std::pair<int64_t, int64_t>>;
@@ -133,4 +132,4 @@ FailureOr<func::FuncOp> selectTaskFunction(ModuleOp module,
 } // namespace amoeba
 } // namespace mlir
 
-#endif // AMOEBA_ANALYTICAL_TASK_DSE_SUPPORT_H
+#endif // AMOEBA_ANALYTICAL_TASK_CANDIDATE_SPACE_H
