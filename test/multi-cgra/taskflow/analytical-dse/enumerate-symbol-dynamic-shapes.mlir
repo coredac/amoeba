@@ -5,6 +5,12 @@
 // RUN:   --mlir-print-op-on-diagnostic=false > %t.program 2>&1
 // RUN: FileCheck %s --input-file=%t.program --check-prefix=PROGRAM
 // RUN: FileCheck %s --input-file=%t.candidates.jsonl --check-prefix=CANDIDATES
+// RUN: mlir-amoeba-opt %s \
+// RUN:   --classify-task-and-counter \
+// RUN:   '--materialize-analytical-task-candidate=candidates=%t.candidates.jsonl candidate-id=candidate-1' \
+// RUN:   --architecture-spec=%S/../../../archspec/architecture_1x2.yaml \
+// RUN:   --mlir-print-op-on-diagnostic=false > %t.materialized 2>&1
+// RUN: FileCheck %s --input-file=%t.materialized --check-prefix=MATERIALIZED
 
 module {
   func.func @main(%upper: index, %input: i32) -> i32 {
@@ -48,3 +54,16 @@ module {
 // CANDIDATES-NEXT: {"candidate_id":"candidate-0","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"A","trip_count_kind":"symbol_dynamic"}]}
 // CANDIDATES-NEXT: {"candidate_id":"candidate-1","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":2,"cgra_shape":"1x2","cols":2,"kind":"rect","mapper_tile_cols":8,"mapper_tile_rows":4,"rows":1},"task":"A","trip_count_kind":"symbol_dynamic"}]}
 // CANDIDATES-NEXT: {"candidate_count":2,"record_type":"footer","schema":"amoeba-analytical-task-candidates"}
+// MATERIALIZED-LABEL: module {
+// MATERIALIZED-NEXT:   func.func @main(%arg0: index, %arg1: i32) -> i32 attributes {analytical_task_candidate_id = "candidate-1", analytical_task_candidate_scope = "static-shape-concurrent-fit"} {
+// MATERIALIZED-NEXT:     %value_outputs = taskflow.task @A value_inputs(%arg0, %arg1 : index, i32) {amoeba.analytical_shape_orientation_fixed, cgra_count = 2 : i32, cgra_shape = "1x2"} : (index, i32) -> (i32) {
+// MATERIALIZED-NEXT:     ^bb0(%arg2: index, %arg3: i32):
+// MATERIALIZED-NEXT:       %c0 = arith.constant 0 : index
+// MATERIALIZED-NEXT:       %c1 = arith.constant 1 : index
+// MATERIALIZED-NEXT:       %0 = taskflow.counter from %c0 to %arg2 step %c1 attributes {counter_dynamism = "symbol_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
+// MATERIALIZED-NEXT:       taskflow.yield values(%arg3 : i32)
+// MATERIALIZED-NEXT:     }
+// MATERIALIZED-NEXT:     return %value_outputs : i32
+// MATERIALIZED-NEXT:   }
+// MATERIALIZED-NEXT: }
+// MATERIALIZED-EMPTY

@@ -89,6 +89,32 @@ def EnumerateAnalyticalTaskCandidates
                            "mlir::taskflow::TaskflowDialect"];
 }
 
+def MaterializeAnalyticalTaskCandidate
+    : Pass<"materialize-analytical-task-candidate", "ModuleOp"> {
+  let summary = "Materialize one static task-shape candidate";
+  let description = [{
+    Validates a complete candidate manifest, selects one candidate by its
+    sequential ID, and writes its cgra_count and cgra_shape decisions to
+    Taskflow tasks. The selected rectangle orientation is locked so resource
+    allocation cannot silently replace it. This pass does not invoke the
+    mapper. Taskflow counters must first be annotated by
+    `classify-task-and-counter`, matching the enumeration pipeline that
+    produced the manifest.
+  }];
+  let options = [
+    Option<"functionName", "function", "std::string", /*default=*/"\"\"",
+           "Taskflow function to process; inferred when exactly one exists.">,
+    Option<"candidateFile", "candidates", "std::string", /*default=*/"\"\"",
+           "Path to the candidate JSONL manifest.">,
+    Option<"candidateId", "candidate-id", "std::string", /*default=*/"\"\"",
+           "Sequential candidate ID to materialize.">
+  ];
+  let constructor =
+      "::mlir::amoeba::neura::createMaterializeAnalyticalTaskCandidatePass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
 def FuseTask : Pass<"fuse-task", "func::FuncOp"> {
   let summary = "Fuse Taskflow tasks using Neura profitability metrics";
   let description = [{
