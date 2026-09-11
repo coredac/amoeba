@@ -52,6 +52,28 @@
 // RUN: --check-prefix=ANALYTICAL-ENUMERATION
 // RUN: FileCheck %s --input-file=%t.candidates.jsonl \
 // RUN: --check-prefix=ANALYTICAL-CANDIDATES
+// RUN: mlir-amoeba-opt %t.classified.mlir \
+// RUN: '--materialize-analytical-task-candidate=candidates=%t.candidates.jsonl candidate-id=candidate-45' \
+// RUN: --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN: --mlir-print-op-on-diagnostic=false -o %t.materialized.mlir
+// RUN: FileCheck %s --input-file=%t.materialized.mlir \
+// RUN: --check-prefix=ANALYTICAL-MATERIALIZED
+// RUN: sed '/"record_type":"candidate"/d' %t.candidates.jsonl \
+// RUN: > %t.incomplete.jsonl
+// RUN: ! mlir-amoeba-opt %t.classified.mlir \
+// RUN: '--materialize-analytical-task-candidate=candidates=%t.incomplete.jsonl candidate-id=candidate-0' \
+// RUN: --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN: --mlir-print-op-on-diagnostic=false -o /dev/null \
+// RUN: > %t.incomplete.log 2>&1
+// RUN: FileCheck %s --input-file=%t.incomplete.log \
+// RUN: --check-prefix=INCOMPLETE-MANIFEST
+// RUN: ! mlir-amoeba-opt %t.materialized.mlir \
+// RUN: --resource-aware-task-optimization \
+// RUN: --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN: --mlir-print-op-on-diagnostic=false -o /dev/null \
+// RUN: > %t.reallocation.log 2>&1
+// RUN: FileCheck %s --input-file=%t.reallocation.log \
+// RUN: --check-prefix=NO-REALLOCATION
 
 
 // RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
@@ -138,6 +160,18 @@ module {
 // ANALYTICAL-CANDIDATES-SAME: "task":"Task_1","trip_count":64
 // ANALYTICAL-CANDIDATES: "candidate_id":"candidate-155"
 // ANALYTICAL-CANDIDATES: {"candidate_count":156,"record_type":"footer"
+// ANALYTICAL-MATERIALIZED-LABEL: func.func @parallel_nested_example
+// ANALYTICAL-MATERIALIZED-SAME: analytical_task_candidate_id = "candidate-45"
+// ANALYTICAL-MATERIALIZED: taskflow.task @Task_0
+// ANALYTICAL-MATERIALIZED-SAME: amoeba.analytical_shape_orientation_fixed
+// ANALYTICAL-MATERIALIZED-SAME: cgra_count = 3 : i32
+// ANALYTICAL-MATERIALIZED-SAME: cgra_shape = "1x3"
+// ANALYTICAL-MATERIALIZED: taskflow.task @Task_1
+// ANALYTICAL-MATERIALIZED-SAME: amoeba.analytical_shape_orientation_fixed
+// ANALYTICAL-MATERIALIZED-SAME: cgra_count = 2 : i32
+// ANALYTICAL-MATERIALIZED-SAME: cgra_shape = "2x1"
+// INCOMPLETE-MANIFEST: candidate manifest count does not match the complete concurrently packable shape space
+// NO-REALLOCATION: resource-aware-task-optimization cannot run after an analytical task candidate has fixed resource shapes
 
 // SERIALIZED: module {
 // SERIALIZED-NEXT:   func.func @parallel_nested_example(%arg0: memref<16xf32>, %arg1: memref<8x8xf32>, %arg2: memref<8x8xf32>, %arg3: memref<8x8xf32>, %arg4: f32) {
