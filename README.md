@@ -6,8 +6,10 @@ transformations, and the integration layer used to connect Taskflow programs
 to architecture-specific backends.
 
 [Neura](https://github.com/coredac/neura) is currently the first supported
-backend and is consumed as a pinned Git submodule. The project is structured
-so that additional spatial dataflow backends can be integrated without moving
+backend and is consumed as a pinned Git submodule. Analytical task DSE also
+pins [cgra-ii-predictor](https://github.com/guosran/cgra-ii-predictor) as its
+external task-shape cost oracle. The project is structured so that additional
+spatial dataflow backends can be integrated without moving
 architecture-specific concepts into the Taskflow core.
 
 ## Architecture
@@ -50,7 +52,8 @@ amoeba/
 |   |-- Conversion/            # Backend-independent conversions
 |   `-- Backend/               # Backend adapter implementations
 |-- thirdparty/
-|   `-- neura/                 # Neura Git submodule
+|   |-- neura/                 # Neura Git submodule
+|   `-- cgra-ii-predictor/     # Pinned II model and external adapters
 |-- tools/
 |   `-- mlir-amoeba-opt/       # Amoeba optimizer driver
 `-- test/                      # Core, conversion, end-to-end, and backend tests
@@ -68,6 +71,9 @@ Amoeba requires:
   and
 - Git submodule support.
 
+Running the ML-ranked analytical task DSE driver additionally requires Python
+3 and PyTorch as declared by `thirdparty/cgra-ii-predictor/pyproject.toml`.
+
 This is the same LLVM revision used by the current
 [Neura build instructions](https://github.com/coredac/neura#build-llvm--neura)
 and [Amoeba CI](.github/workflows/main.yml).
@@ -81,7 +87,7 @@ git clone --recurse-submodules git@github.com:coredac/amoeba.git
 cd amoeba
 ```
 
-For an existing checkout, initialize or update the pinned Neura revision with:
+For an existing checkout, initialize or update the pinned dependencies with:
 
 ```bash
 git submodule update --init --recursive
@@ -168,6 +174,37 @@ For example, an affine program can be converted to Taskflow with:
 Neura-specific passes and options are registered by the Neura adapter. The
 architecture and latency options are exposed as `--neura-architecture-spec`
 and `--neura-latency-spec`.
+
+## Analytical task DSE
+
+`tools/run-analytical-task-dse.py` connects Amoeba's candidate passes to the
+pinned II predictor. It freezes the complete concurrently packable static
+rectangle space in C++, extracts one pre-mapper Neura DFG per task, produces
+one provenance-bound cost per task and oriented mapper shape, scores every
+candidate, and invokes the forwarded real pipeline only for deterministic
+top-k entries.
+
+```bash
+./tools/run-analytical-task-dse.py prepared-taskflow.mlir \
+  --architecture test/archspec/architecture.yaml \
+  --top-k 1 \
+  --output-dir /tmp/amoeba-shape-dse \
+  -- \
+  '--orchestrate-tasks-on-accelerators=scheduling-mode=spatial'
+```
+
+The input must already contain Taskflow tasks with one pre-mapper Neura kernel
+per task. Everything after `--` runs once per validated shortlist entry. The
+Python code consumes the candidate manifest and its declared cost queries; it
+does not enumerate candidates. C++ validates the full candidate space before
+publishing the shortlist.
+
+The current program objective is the maximum predicted task duration, where
+`duration = startup_cycles + predicted_ii * (trip_count - 1)`. Enumeration and
+materialization preserve symbol-dynamic trip counts, but ranking requires them
+to be concretely bound first. The score does not yet model temporal scheduling
+or task communication, and the search axes do not yet include fusion, fission,
+or tiling.
 
 ## Tests
 

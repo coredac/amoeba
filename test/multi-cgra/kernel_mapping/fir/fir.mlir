@@ -48,6 +48,25 @@
 // RUN: -o %t.dataflow.mlir
 // RUN: FileCheck %s --input-file=%t.dataflow.mlir --check-prefixes=DATAFLOW
 
+// The predictor feature adapter invokes the read-only bound analysis on one
+// extracted pre-mapper DFG for each oriented mapper shape.
+// RUN: mlir-amoeba-opt %t.dataflow.mlir \
+// RUN: '--analyze-analytical-lower-bound=x-tiles=4 y-tiles=4' \
+// RUN: --architecture-spec=%S/../../../archspec/architecture.yaml \
+// RUN: | FileCheck %s --check-prefix=ANALYTICAL-BOUNDS
+
+// Run the real predictor and heuristic mapper pipeline on this existing FIR
+// workload, materializing only the selected candidate.
+// RUN: rm -rf %t.analytical-dse
+// RUN: python3 %S/../../../../tools/run-analytical-task-dse.py \
+// RUN: %t.dataflow.mlir \
+// RUN: --architecture=%S/../../../archspec/architecture.yaml \
+// RUN: --amoeba-opt=mlir-amoeba-opt \
+// RUN: --output-dir=%t.analytical-dse --top-k=1 -- \
+// RUN: --insert-data-mov \
+// RUN: '--map-to-accelerator=mapping-strategy=heuristic' \
+// RUN: | FileCheck %s --check-prefix=ANALYTICAL-DSE
+
 // RUN: mlir-amoeba-opt %s --convert-affine-to-taskflow \
 // RUN: --construct-hyperblock-from-task \
 // RUN: --classify-task-and-counter \
@@ -74,6 +93,11 @@
 // RUN: FileCheck %s --input-file=%t.mapped.mlir --check-prefixes=MAPPED
 
 
+
+// ANALYTICAL-BOUNDS: module attributes {amoeba.analytical_lower_bound = 2 : i32, amoeba.analytical_lower_bound_info, amoeba.rec_mii = 2 : i32, amoeba.res_mii = 1 : i32}
+// ANALYTICAL-DSE: "candidate_id": "candidate-0"
+// ANALYTICAL-DSE: "shortlist_materialization_invocations": 1
+// ANALYTICAL-DSE: "top_k_requested": 1
 
 module attributes {} {
   func.func @_Z6kernelPiS_S_(%arg0: memref<?xi32>, %arg1: memref<?xi32>, %arg2: memref<?xi32>) -> i32 attributes {llvm.linkage = #llvm.linkage<external>} {

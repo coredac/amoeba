@@ -65,6 +65,26 @@ def OrchestrateTasksOnAccelerators
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
 
+def AnalyzeAnalyticalLowerBound
+    : Pass<"analyze-analytical-lower-bound", "ModuleOp"> {
+  let summary = "Compute a mapper-compatible lower bound without mapping";
+  let description = [{
+    Computes the analytical initiation-interval lower bound used by Neura's
+    heuristic mapper for exactly one standalone task DFG. x-tiles and y-tiles
+    select the concrete mapper rectangle. The combined lower bound and its
+    RecMII and ResMII components are written as module attributes for the
+    external ML feature adapter. The pass never places or routes an operation.
+  }];
+  let options = [Option<"xTiles", "x-tiles", "int64_t", /*default=*/"0",
+                         "Concrete mapper tile columns; must be positive.">,
+                 Option<"yTiles", "y-tiles", "int64_t", /*default=*/"0",
+                         "Concrete mapper tile rows; must be positive.">];
+  let constructor =
+      "::mlir::amoeba::neura::createAnalyzeAnalyticalLowerBoundPass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::neura::NeuraDialect"];
+}
+
 def EnumerateAnalyticalTaskCandidates
     : Pass<"enumerate-analytical-task-candidates", "ModuleOp"> {
   let summary = "Freeze all concurrently packable static task shapes";
@@ -117,6 +137,37 @@ def MaterializeAnalyticalTaskCandidate
   let constructor =
       "::mlir::amoeba::neura::createMaterializeAnalyticalTaskCandidatePass()";
   let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
+def ScoreAnalyticalTaskCandidates
+    : Pass<"score-analytical-task-candidates", "ModuleOp"> {
+  let summary = "Score every candidate in a frozen analytical-task manifest";
+  let description = [{
+    Validates and scores every candidate from a complete manifest using a
+    provenance-bound external ML II/startup cost catalogue. Repeated queries
+    share a stable task-body, architecture, and oriented-shape cache. Only
+    after complete manifest traversal is a deterministic top-k shortlist
+    emitted. The current score is the maximum per-task compute duration;
+    communication and temporal scheduling remain outside this pass. A
+    symbol-dynamic trip count must be concretely bound before ranking.
+  }];
+  let options = [
+    Option<"functionName", "function", "std::string", /*default=*/"\"\"",
+           "Taskflow function to process; inferred when exactly one exists.">,
+    Option<"candidateFile", "candidates", "std::string", /*default=*/"\"\"",
+           "Path to the frozen candidate JSONL manifest.">,
+    Option<"costFile", "cost-file", "std::string", /*default=*/"\"\"",
+           "Path to the task-shape ML cost catalogue.">,
+    Option<"outputFile", "output", "std::string", /*default=*/"\"\"",
+           "Path to the score JSONL manifest.">,
+    Option<"topK", "top-k", "int64_t", /*default=*/"1",
+           "Candidates to shortlist; zero selects every valid candidate.">
+  ];
+  let constructor =
+      "::mlir::amoeba::neura::createScoreAnalyticalTaskCandidatesPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::func::FuncDialect",
                            "mlir::taskflow::TaskflowDialect"];
 }
 
