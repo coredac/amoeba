@@ -47,7 +47,9 @@ struct CgraShape {
   // equals cgra_count; for non-rectangular shapes it is larger than cgra_count
   // (some cells in the bbox are unoccupied).  Used only for shape sorting
   // (prefer smaller bounding boxes), not for counting occupied CGRAs.
-  int area() const { return rows * cols; }
+  int area() const {
+    return rows * cols;
+  }
 
   std::string describe(int cgra_count) const;
   std::string irAttr() const;
@@ -61,17 +63,6 @@ llvm::SmallVector<CgraShape>
 getRectangularShapes(int cgra_count, int grid_rows = kCgraGridRows,
                      int grid_cols = kCgraGridCols);
 
-// Generates all placement-candidate shapes for `cgra_count` CGRAs, including
-// rotations. Rectangular shapes include both orientations (rows×cols and
-// cols×rows, deduplicated for squares). Non-rectangular shapes include all
-// four 90° rotations.
-//
-// Ordering (tried first to last):
-//   1. Rectangular shapes, sorted by squareness (e.g. 2×2 before 1×4),
-//      with smaller bounding-box area as tiebreaker.
-//   2. Non-rectangular shapes (L, T, etc.) in all unique rotations.
-llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
-
 // Infers a trip count from Taskflow counter chains whose bounds and steps are
 // constant index values. Counts multiply along each root-to-leaf chain;
 // concurrent sibling chains and independent roots use the maximum. Returns
@@ -80,6 +71,14 @@ llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
 // overflowing counters. It never substitutes a guessed count.
 FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
                                                            std::string &error);
+
+// Global placement feasibility.
+
+// Checks by exhaustive backtracking whether the fixed, oriented task shapes
+// can be placed simultaneously without overlap. The grid dimensions are
+// explicit so callers can use the active architecture.
+bool canShapesFitOnGrid(llvm::ArrayRef<CgraShape> task_shapes, int grid_rows,
+                        int grid_cols);
 
 // Task scheduling utilities.
 

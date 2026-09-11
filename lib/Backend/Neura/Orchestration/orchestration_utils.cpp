@@ -15,6 +15,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -65,108 +66,6 @@ SmallVector<CgraShape> getRectangularShapes(int cgra_count, int grid_rows,
       shapes.push_back({rows, cols, true, {}});
     }
   }
-  return shapes;
-}
-
-// Internal helpers
-
-namespace {
-
-// Returns the set of non-rectangular shapes for `cgra_count` CGRAs.
-// Currently defined for cgra_count == 3 (L-shape) and cgra_count == 4
-// (L-shape and T-shape variants).
-SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes;
-
-  if (cgra_count == 3) {
-    // L-shape 3 CGRAs: (0,0)(1,0)(0,1) — bbox 2×2
-    shapes.push_back({2, 2, false, {{0, 0}, {1, 0}, {0, 1}}});
-  }
-
-  if (cgra_count == 4) {
-    // T-shape: three in a row + one below centre
-    //   (0,0)(1,0)(2,0)(1,1)  — bbox 2×3
-    shapes.push_back({2, 3, false, {{0, 0}, {1, 0}, {2, 0}, {1, 1}}});
-
-    // L-shape: three in a column + one offset
-    //   (0,0)(0,1)(0,2)(1,2)  — bbox 3×2
-    shapes.push_back({3, 2, false, {{0, 0}, {0, 1}, {0, 2}, {1, 2}}});
-  }
-
-  return shapes;
-}
-
-} // namespace
-
-// getAllPlacementShapes
-
-SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes = getRectangularShapes(cgra_count);
-  llvm::sort(shapes, [](const CgraShape &lhs, const CgraShape &rhs) {
-    int squareness_lhs = std::abs(lhs.rows - lhs.cols);
-    int squareness_rhs = std::abs(rhs.rows - rhs.cols);
-    if (squareness_lhs != squareness_rhs) {
-      return squareness_lhs < squareness_rhs;
-    }
-    return lhs.area() < rhs.area();
-  });
-
-  // 2. Non-rectangular shapes with all four 90° rotations.
-  auto base_non_rect = getNonRectangularShapes(cgra_count);
-  for (const auto &base : base_non_rect) {
-    // Generates 4 rotations of the cgra_positions list.
-    // Rotation by 90° CW: (col, row) -> (row, -col).
-    // Each rotation is normalised so that offsets start from (0, 0).
-    SmallVector<SmallVector<std::pair<int, int>>, 4> rotation_variants;
-    rotation_variants.push_back(
-        SmallVector<std::pair<int, int>>(base.cgra_positions));
-
-    auto prev_positions = base.cgra_positions;
-    for (int rotation_idx = 0; rotation_idx < 3; ++rotation_idx) {
-      SmallVector<std::pair<int, int>> rotated_positions;
-      for (auto &[col_off, row_off] : prev_positions)
-        rotated_positions.push_back(
-            {row_off, -col_off}); // 90° CW in (col, row) space
-
-      // Normalises to non-negative offsets starting from (0, 0).
-      int min_col = INT_MAX, min_row = INT_MAX;
-      for (auto &[col_off, row_off] : rotated_positions) {
-        min_col = std::min(min_col, col_off);
-        min_row = std::min(min_row, row_off);
-      }
-      for (auto &[col_off, row_off] : rotated_positions) {
-        col_off -= min_col;
-        row_off -= min_row;
-      }
-      rotation_variants.push_back(rotated_positions);
-      prev_positions = rotated_positions;
-    }
-
-    // Deduplicates rotations that produce the same position set.
-    // Hash parameters: multiplier 131 and positional weight 17 are chosen to
-    // give low collision rates for small integer coordinate sets.
-    llvm::DenseSet<int64_t> seen_hashes;
-    for (auto &positions : rotation_variants) {
-      auto sorted_positions = positions;
-      llvm::sort(sorted_positions,
-                 [](const std::pair<int, int> &lhs,
-                    const std::pair<int, int> &rhs) { return lhs < rhs; });
-      int64_t hash = 0;
-      for (auto &[col_off, row_off] : sorted_positions)
-        hash = hash * 131 + col_off * 17 + row_off;
-      if (!seen_hashes.insert(hash).second) {
-        continue;
-      }
-      // Computes bounding box for this rotation.
-      int max_col = 0, max_row = 0;
-      for (auto &[col_off, row_off] : positions) {
-        max_col = std::max(max_col, col_off);
-        max_row = std::max(max_row, row_off);
-      }
-      shapes.push_back({max_row + 1, max_col + 1, false, std::move(positions)});
-    }
-  }
-
   return shapes;
 }
 
@@ -284,6 +183,111 @@ FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
   return std::optional<int64_t>{total};
 }
 
+// Returns the occupied (column, row) offsets for one valid shape.
+static std::optional<SmallVector<std::pair<int, int>>>
+getShapeCells(const CgraShape &shape, int grid_rows, int grid_cols) {
+  if (shape.rows <= 0 || shape.cols <= 0 || shape.rows > grid_rows ||
+      shape.cols > grid_cols)
+    return std::nullopt;
+
+  SmallVector<std::pair<int, int>> cells;
+  if (shape.is_rectangular) {
+    for (int row = 0; row < shape.rows; ++row)
+      for (int col = 0; col < shape.cols; ++col)
+        cells.push_back({col, row});
+    return cells;
+  }
+  if (shape.cgra_positions.empty())
+    return std::nullopt;
+
+  DenseSet<int64_t> seen;
+  for (auto [col, row] : shape.cgra_positions) {
+    if (col < 0 || col >= shape.cols || row < 0 || row >= shape.rows)
+      return std::nullopt;
+    int64_t key = static_cast<int64_t>(row) * shape.cols + col;
+    if (!seen.insert(key).second)
+      return std::nullopt;
+    cells.push_back({col, row});
+  }
+  return cells;
+}
+
+// Explores every shape and origin choice so the feasibility result is exact.
+static bool placeShapeChoices(size_t task_index,
+                              ArrayRef<SmallVector<CgraShape>> shape_choices,
+                              int grid_rows, int grid_cols,
+                              MutableArrayRef<uint8_t> occupied) {
+  if (task_index == shape_choices.size())
+    return true;
+
+  for (const CgraShape &shape : shape_choices[task_index]) {
+    std::optional<SmallVector<std::pair<int, int>>> cells =
+        getShapeCells(shape, grid_rows, grid_cols);
+    if (!cells)
+      continue;
+    for (int origin_row = 0; origin_row + shape.rows <= grid_rows;
+         ++origin_row) {
+      for (int origin_col = 0; origin_col + shape.cols <= grid_cols;
+           ++origin_col) {
+        bool overlaps = llvm::any_of(*cells, [&](auto offset) {
+          auto [col, row] = offset;
+          return occupied[static_cast<size_t>((origin_row + row) * grid_cols +
+                                              origin_col + col)] != 0;
+        });
+        if (overlaps)
+          continue;
+
+        for (auto [col, row] : *cells)
+          occupied[static_cast<size_t>((origin_row + row) * grid_cols +
+                                       origin_col + col)] = 1;
+        if (placeShapeChoices(task_index + 1, shape_choices, grid_rows,
+                              grid_cols, occupied))
+          return true;
+        for (auto [col, row] : *cells)
+          occupied[static_cast<size_t>((origin_row + row) * grid_cols +
+                                       origin_col + col)] = 0;
+      }
+    }
+  }
+  return false;
+}
+
+bool canShapesFitOnGrid(ArrayRef<CgraShape> task_shapes, int grid_rows,
+                        int grid_cols) {
+  if (grid_rows <= 0 || grid_cols <= 0 ||
+      static_cast<uint64_t>(grid_rows) * static_cast<uint64_t>(grid_cols) >
+          std::numeric_limits<size_t>::max())
+    return false;
+
+  const uint64_t grid_area = static_cast<uint64_t>(grid_rows) * grid_cols;
+  uint64_t occupied_cells = 0;
+  for (const CgraShape &shape : task_shapes) {
+    std::optional<SmallVector<std::pair<int, int>>> cells =
+        getShapeCells(shape, grid_rows, grid_cols);
+    if (!cells || cells->size() > grid_area - occupied_cells)
+      return false;
+    occupied_cells += cells->size();
+  }
+
+  SmallVector<CgraShape> largest_first(task_shapes.begin(), task_shapes.end());
+  llvm::sort(largest_first, [](const CgraShape &lhs, const CgraShape &rhs) {
+    auto cell_count = [](const CgraShape &shape) {
+      return shape.is_rectangular
+                 ? static_cast<int64_t>(shape.rows) * shape.cols
+                 : static_cast<int64_t>(shape.cgra_positions.size());
+    };
+    return cell_count(lhs) > cell_count(rhs);
+  });
+  SmallVector<SmallVector<CgraShape>> shape_choices;
+  shape_choices.reserve(largest_first.size());
+  for (const CgraShape &shape : largest_first)
+    shape_choices.push_back({shape});
+
+  SmallVector<uint8_t> occupied(
+      static_cast<size_t>(grid_rows) * static_cast<size_t>(grid_cols), 0);
+  return placeShapeChoices(0, shape_choices, grid_rows, grid_cols, occupied);
+}
+
 // Task scheduling utilities
 
 // CGRA Grid Position (spatial + temporal)
@@ -309,7 +313,9 @@ struct CgraPosition {
     return row == other.row && col == other.col;
   }
 
-  bool operator!=(const CgraPosition &other) const { return !(*this == other); }
+  bool operator!=(const CgraPosition &other) const {
+    return !(*this == other);
+  }
 
   int manhattanDistance(const CgraPosition &other) const {
     return std::abs(row - other.row) + std::abs(col - other.col);
@@ -863,7 +869,7 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
     }
   }
   if (shapes_to_try.empty()) {
-    shapes_to_try = getAllPlacementShapes(cgra_count);
+    shapes_to_try = getRectangularShapes(cgra_count, grid_rows_, grid_cols_);
   }
 
   int task_duration = getScheduleDuration(task_node);

@@ -43,6 +43,15 @@
 // RUN: mlir-amoeba-opt %t.hyperblock.mlir --classify-task-and-counter \
 // RUN: -o %t.classified.mlir
 // RUN: FileCheck %s --input-file=%t.classified.mlir --check-prefix=COUNTER-FACTS
+// RUN: mlir-amoeba-opt %t.classified.mlir \
+// RUN: '--enumerate-analytical-task-candidates=output=%t.candidates.jsonl' \
+// RUN: --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
+// RUN: --mlir-print-op-on-diagnostic=false -o %t.bound.mlir \
+// RUN: > %t.enumeration.log 2>&1
+// RUN: FileCheck %s --input-file=%t.enumeration.log \
+// RUN: --check-prefix=ANALYTICAL-ENUMERATION
+// RUN: FileCheck %s --input-file=%t.candidates.jsonl \
+// RUN: --check-prefix=ANALYTICAL-CANDIDATES
 
 
 // RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
@@ -117,6 +126,18 @@ module {
 // COUNTER-FACTS: taskflow.task @Task_1
 // COUNTER-FACTS: taskflow.counter {{.*}} attributes {counter_dynamism = "constant_bound", counter_hierarchy = "root", counter_id = 0 : i32}
 // COUNTER-FACTS: taskflow.counter parent({{.*}}) {{.*}} attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 1 : i32}
+// ANALYTICAL-ENUMERATION: enumerated all 156 concurrently packable shape candidates
+// ANALYTICAL-CANDIDATES-LABEL: "function":"parallel_nested_example"
+// ANALYTICAL-CANDIDATES-SAME: "task":"Task_0","trip_count":16
+// ANALYTICAL-CANDIDATES-SAME: "task":"Task_1","trip_count":64
+// ANALYTICAL-CANDIDATES: "candidate_id":"candidate-0"
+// ANALYTICAL-CANDIDATES: "candidate_id":"candidate-45"
+// ANALYTICAL-CANDIDATES-SAME: "cgra_shape":"1x3"
+// ANALYTICAL-CANDIDATES-SAME: "task":"Task_0","trip_count":16
+// ANALYTICAL-CANDIDATES-SAME: "cgra_shape":"2x1"
+// ANALYTICAL-CANDIDATES-SAME: "task":"Task_1","trip_count":64
+// ANALYTICAL-CANDIDATES: "candidate_id":"candidate-155"
+// ANALYTICAL-CANDIDATES: {"candidate_count":156,"record_type":"footer"
 
 // SERIALIZED: module {
 // SERIALIZED-NEXT:   func.func @parallel_nested_example(%arg0: memref<16xf32>, %arg1: memref<8x8xf32>, %arg2: memref<8x8xf32>, %arg3: memref<8x8xf32>, %arg4: f32) {
@@ -388,4 +409,3 @@ module {
 // RESOPT-NEXT:     return
 // RESOPT-NEXT:   }
 // RESOPT-NEXT: }
-
