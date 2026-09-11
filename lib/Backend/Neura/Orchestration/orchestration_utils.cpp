@@ -2,6 +2,7 @@
 
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -14,6 +15,7 @@
 #include <cassert>
 #include <climits>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,6 +51,25 @@ std::string CgraShape::irAttr() const {
   return s;
 }
 
+SmallVector<CgraShape> getRectangularShapes(int cgra_count, int grid_rows,
+                                            int grid_cols) {
+  SmallVector<CgraShape> shapes;
+  if (cgra_count <= 0 || grid_rows <= 0 || grid_cols <= 0) {
+    return shapes;
+  }
+
+  for (int rows = 1; rows <= grid_rows; ++rows) {
+    if (cgra_count % rows != 0) {
+      continue;
+    }
+    int cols = cgra_count / rows;
+    if (cols <= grid_cols) {
+      shapes.push_back({rows, cols, true, {}});
+    }
+  }
+  return shapes;
+}
+
 // Internal helpers
 
 namespace {
@@ -82,38 +103,15 @@ SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
 // getAllPlacementShapes
 
 SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
-  SmallVector<CgraShape> shapes;
-
-  // 1. Rectangular shapes with both orientations, deduplicated.
-  {
-    llvm::DenseSet<int64_t> seen_keys; // encodes (rows<<16)|cols
-    for (int row_dim = 1; row_dim <= kCgraGridRows; ++row_dim) {
-      for (int col_dim = 1; col_dim <= kCgraGridCols; ++col_dim) {
-        if (row_dim * col_dim == cgra_count) {
-          int64_t key = ((int64_t)row_dim << 16) | col_dim;
-          if (seen_keys.insert(key).second) {
-            shapes.push_back({row_dim, col_dim, true, {}});
-            // Adds the rotated orientation if different (e.g. 1×4 -> 4×1).
-            if (row_dim != col_dim) {
-              int64_t rotated_key = ((int64_t)col_dim << 16) | row_dim;
-              if (seen_keys.insert(rotated_key).second) {
-                shapes.push_back({col_dim, row_dim, true, {}});
-              }
-            }
-          }
-        }
-      }
+  SmallVector<CgraShape> shapes = getRectangularShapes(cgra_count);
+  llvm::sort(shapes, [](const CgraShape &lhs, const CgraShape &rhs) {
+    int squareness_lhs = std::abs(lhs.rows - lhs.cols);
+    int squareness_rhs = std::abs(rhs.rows - rhs.cols);
+    if (squareness_lhs != squareness_rhs) {
+      return squareness_lhs < squareness_rhs;
     }
-    // Sorts rectangles: prefer more square-like (smaller |rows-cols|), then
-    // smaller bounding-box area as tiebreaker.
-    llvm::sort(shapes, [](const CgraShape &lhs, const CgraShape &rhs) {
-      int squareness_lhs = std::abs(lhs.rows - lhs.cols);
-      int squareness_rhs = std::abs(rhs.rows - rhs.cols);
-      if (squareness_lhs != squareness_rhs)
-        return squareness_lhs < squareness_rhs;
-      return lhs.area() < rhs.area();
-    });
-  }
+    return lhs.area() < rhs.area();
+  });
 
   // 2. Non-rectangular shapes with all four 90° rotations.
   auto base_non_rect = getNonRectangularShapes(cgra_count);
@@ -172,6 +170,120 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
   }
 
   return shapes;
+}
+
+// Infers a static trip count from Taskflow counter chains. A constant counter
+// such as `0..10 step 3` contributes four iterations. Counts multiply along
+// each root-to-leaf chain; sibling chains and independent roots use the maximum
+// chain product because they execute concurrently.
+// The result has three states: a number for a supported static counter chain,
+// nullopt when no Taskflow counter exists, and failure for non-constant,
+// malformed, or overflowing counters.
+FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
+                                                           std::string &error) {
+  SmallVector<TaskflowCounterOp> counters;
+  task.walk([&](TaskflowCounterOp counter) { counters.push_back(counter); });
+  if (counters.empty()) {
+    return std::optional<int64_t>{};
+  }
+  if (!task.getBody().hasOneBlock()) {
+    error = "task " + task.getTaskName().str() +
+            " must contain exactly one block to infer a static trip count";
+    return failure();
+  }
+
+  SmallVector<TaskflowCounterOp> roots;
+  DenseMap<Value, SmallVector<TaskflowCounterOp>> children;
+  for (TaskflowCounterOp counter : counters) {
+    if (Value parent = counter.getParentIndex()) {
+      children[parent].push_back(counter);
+    } else {
+      roots.push_back(counter);
+    }
+  }
+  if (roots.empty()) {
+    error = "task " + task.getTaskName().str() +
+            " has counters but no root counter";
+    return failure();
+  }
+
+  auto constantIndex = [](Value value) -> FailureOr<int64_t> {
+    if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>()) {
+      return constant.value();
+    }
+    return failure();
+  };
+  auto counterTripCount = [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
+    FailureOr<int64_t> lower = constantIndex(counter.getLowerBound());
+    FailureOr<int64_t> upper = constantIndex(counter.getUpperBound());
+    FailureOr<int64_t> step = constantIndex(counter.getStep());
+    if (failed(lower) || failed(upper) || failed(step)) {
+      return failure();
+    }
+    if (*step <= 0 || *upper <= *lower ||
+        (*lower < 0 && *upper > std::numeric_limits<int64_t>::max() + *lower)) {
+      return failure();
+    }
+    int64_t distance = *upper - *lower;
+    return 1 + (distance - 1) / *step;
+  };
+
+  DenseSet<Operation *> active;
+  DenseSet<Operation *> visited;
+  std::function<FailureOr<int64_t>(TaskflowCounterOp)> chainTripCount =
+      [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
+    if (!active.insert(counter.getOperation()).second ||
+        visited.contains(counter.getOperation())) {
+      error = "task " + task.getTaskName().str() +
+              " has a cyclic or multiply referenced counter chain";
+      return failure();
+    }
+
+    FailureOr<int64_t> count = counterTripCount(counter);
+    if (failed(count)) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    int64_t longestChildChain = 1;
+    auto found = children.find(counter.getCounterIndex());
+    if (found != children.end()) {
+      for (TaskflowCounterOp child : found->second) {
+        FailureOr<int64_t> childCount = chainTripCount(child);
+        if (failed(childCount)) {
+          return failure();
+        }
+        longestChildChain = std::max(longestChildChain, *childCount);
+      }
+    }
+    if (*count > std::numeric_limits<int64_t>::max() / longestChildChain) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    active.erase(counter.getOperation());
+    visited.insert(counter.getOperation());
+    return *count * longestChildChain;
+  };
+
+  int64_t total = 1;
+  for (TaskflowCounterOp root : roots) {
+    FailureOr<int64_t> rootCount = chainTripCount(root);
+    if (failed(rootCount)) {
+      return failure();
+    }
+    total = std::max(total, *rootCount);
+  }
+  if (visited.size() != counters.size()) {
+    error = "task " + task.getTaskName().str() +
+            " has a counter disconnected from every root";
+    return failure();
+  }
+  return std::optional<int64_t>{total};
 }
 
 // canAllTasksFitOnGrid
