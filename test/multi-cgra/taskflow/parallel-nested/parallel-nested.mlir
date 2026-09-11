@@ -39,6 +39,11 @@
 // RUN: -o %t.hyperblock.mlir
 // RUN: FileCheck %s --input-file=%t.hyperblock.mlir --check-prefixes=HYPERBLOCK
 
+// Reuse the existing two-task workload to cover flat and nested counter facts.
+// RUN: mlir-amoeba-opt %t.hyperblock.mlir --classify-task-and-counter \
+// RUN: -o %t.classified.mlir
+// RUN: FileCheck %s --input-file=%t.classified.mlir --check-prefix=COUNTER-FACTS
+
 
 // RUN: mlir-amoeba-opt %s --affine-loop-tree-serialization \
 // RUN: --convert-affine-to-taskflow \
@@ -106,6 +111,12 @@ module {
     return
   }
 }
+
+// COUNTER-FACTS: taskflow.task @Task_0
+// COUNTER-FACTS: taskflow.counter {{.*}} attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32}
+// COUNTER-FACTS: taskflow.task @Task_1
+// COUNTER-FACTS: taskflow.counter {{.*}} attributes {counter_dynamism = "constant_bound", counter_hierarchy = "root", counter_id = 0 : i32}
+// COUNTER-FACTS: taskflow.counter parent({{.*}}) {{.*}} attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 1 : i32}
 
 // SERIALIZED: module {
 // SERIALIZED-NEXT:   func.func @parallel_nested_example(%arg0: memref<16xf32>, %arg1: memref<8x8xf32>, %arg2: memref<8x8xf32>, %arg3: memref<8x8xf32>, %arg4: f32) {
@@ -377,5 +388,4 @@ module {
 // RESOPT-NEXT:     return
 // RESOPT-NEXT:   }
 // RESOPT-NEXT: }
-
 
