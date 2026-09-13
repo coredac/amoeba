@@ -194,7 +194,7 @@ module attributes {} {
 // DATAFLOW-NEXT:       %c1 = arith.constant 1 : index
 // DATAFLOW-NEXT:       %0 = taskflow.counter from %c0 to %c32 step %c1 attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
 // DATAFLOW-NEXT:       %1 = neura.kernel inputs(%arg3, %arg4 : memref<?xi32>, memref<?xi32>) iter_args_init(%arg5 : i32) attributes {accelerator = "neura", dataflow_mode = "predicate"} {
-// DATAFLOW-NEXT:       ^bb0(%arg6: memref<?xi32>, %arg7: memref<?xi32>, %arg8: i32):
+// DATAFLOW-NEXT:       ^bb0(%arg6: !neura.data<memref<?xi32>, i1>, %arg7: !neura.data<memref<?xi32>, i1>, %arg8: !neura.data<i32, i1>):
 // DATAFLOW-NEXT:         %2 = "neura.grant_once"() <{constant_value = "%iter_arg_init0"}> : () -> !neura.data<i32, i1>
 // DATAFLOW-NEXT:         %3 = neura.reserve : !neura.data<i32, i1>
 // DATAFLOW-NEXT:         %4 = neura.phi_start %2, %3 : !neura.data<i32, i1>, !neura.data<i32, i1> -> !neura.data<i32, i1>
@@ -226,7 +226,7 @@ module attributes {} {
 // MAPPED-NEXT:       %c1 = arith.constant 1 : index
 // MAPPED-NEXT:       %0 = taskflow.counter from %c0 to %c32 step %c1 attributes {counter_dynamism = "constant_bound", counter_hierarchy = "leaf", counter_id = 0 : i32} : index
 // MAPPED-NEXT:       %1 = neura.kernel inputs(%arg3, %arg4 : memref<?xi32>, memref<?xi32>) iter_args_init(%arg5 : i32) attributes {accelerator = "neura", dataflow_mode = "predicate", mapping_info = {compiled_ii = 4 : i32, mapping_mode = "spatial-temporal", mapping_strategy = "heuristic", rec_mii = 2 : i32, res_mii = 1 : i32, x_tiles = 4 : i32, y_tiles = 4 : i32}} {
-// MAPPED-NEXT:       ^bb0(%arg6: memref<?xi32>, %arg7: memref<?xi32>, %arg8: i32):
+// MAPPED-NEXT:       ^bb0(%arg6: !neura.data<memref<?xi32>, i1>, %arg7: !neura.data<memref<?xi32>, i1>, %arg8: !neura.data<i32, i1>):
 // MAPPED-NEXT:         %2 = "neura.grant_once"() <{constant_value = "%iter_arg_init0"}> {dfg_id = 0 : i32, mapping_locs = [{id = 8 : i32, index_per_ii = 1 : i32, invalid_iterations = 0 : i32, resource = "tile", time_step = 1 : i32, x = 0 : i32, y = 2 : i32}]} : () -> !neura.data<i32, i1>
 // MAPPED-NEXT:         %3 = neura.reserve {dfg_id = 1 : i32} : !neura.data<i32, i1>
 // MAPPED-NEXT:         %4 = "neura.data_mov"(%2) {dfg_id = 4 : i32, mapping_locs = [{id = 24 : i32, index_per_ii = 1 : i32, invalid_iterations = 0 : i32, resource = "link", time_step = 1 : i32}]} : (!neura.data<i32, i1>) -> !neura.data<i32, i1>

@@ -1404,7 +1404,8 @@ private:
         task_a.getLoc(), merged_kernel_results, merged_kernel_inputs,
         merged_iter_args,
         /*cgra_id=*/nullptr, /*kernel_name=*/nullptr,
-        /*accelerator=*/builder.getStringAttr("neura"));
+        /*accelerator=*/builder.getStringAttr("neura"),
+        /*kernel_metadata=*/nullptr);
     fused_kernel->setAttr("dataflow_mode", builder.getStringAttr("predicate"));
 
     // Builds kernel entry block and block-arg mappings.
