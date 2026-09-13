@@ -107,7 +107,8 @@ struct TaskNode;
 // Internal task/memory dependency graph built from one func.func.
 class TaskMemoryGraph;
 
-// Caller-provided task priority; higher values are scheduled earlier.
+// Caller-provided task priority; higher values are scheduled earlier among
+// tasks whose predecessors have already been placed.
 using TaskPriorityMap = llvm::DenseMap<Operation *, int>;
 
 // Reusable one-shot scheduler/placer for Taskflow task graphs.
