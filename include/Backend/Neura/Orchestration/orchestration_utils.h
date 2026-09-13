@@ -43,16 +43,6 @@ struct CgraShape {
   // (some cells in the bbox are unoccupied).  Used only for shape sorting
   // (prefer smaller bounding boxes), not for counting occupied CGRAs.
   int area() const { return rows * cols; }
-
-  // Returns a human-readable description for log messages only (not IR).
-  std::string describe(int cgra_count) const;
-
-  // Returns the shape string written into the IR cgra_shape attribute.
-  // For rectangular shapes: "NxM" (e.g. "2x2").
-  // For non-rectangular shapes: "NxM[(c0,r0)(c1,r1)...]" listing only the
-  // occupied CGRA positions so that downstream passes can reconstruct the
-  // exact valid tile set for multi-CGRA mapping.
-  std::string irAttr() const;
 };
 
 // Shape enumeration utilities.
@@ -67,21 +57,6 @@ struct CgraShape {
 //      with smaller bounding-box area as tiebreaker.
 //   2. Non-rectangular shapes (L, T, etc.) in all unique rotations.
 llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
-
-// Global placement feasibility.
-
-// Simulates greedy placement of all tasks' shapes on the kCgraGridRows x
-// kCgraGridCols grid to verify that they physically fit without overlap.
-//
-// For each task, all valid shapes (including rotations) are tried. Rectangular
-// shapes prefer square-like orientations (e.g. 2x2 over 1x4). Non-rectangular
-// shapes are tried in all four 90 degree rotations.
-//
-// `task_cgra_counts` contains the cgra_count for every task in the graph
-// (including the speculatively modified one).
-//
-// Returns true if all tasks can be placed without overlap.
-bool canAllTasksFitOnGrid(llvm::ArrayRef<int> task_cgra_counts);
 
 // Task scheduling utilities.
 

@@ -124,6 +124,25 @@ registerBackends()
 mlir-amoeba-opt
 ```
 
+## Orchestration strategies
+
+The Neura adapter separates the shared `TaskScheduler`, individual strategy
+libraries, and the `MLIRAmoebaNeuraOrchestration` umbrella library. Strategies
+implement `Orchestration` and supply task priorities to the scheduler, which
+places predecessors before consumers and uses priority to choose among ready
+tasks. Internal time scaling preserves the original task duration metadata.
+
+`orchestrate-tasks-on-accelerators` selects `routing-critical-path` by default.
+It can also be selected explicitly:
+
+```text
+--orchestrate-tasks-on-accelerators="orchestration-strategy=routing-critical-path scheduling-mode=spatial-temporal"
+```
+
+Unknown strategies and unsuccessful placements cause the pass to fail. To add
+a strategy, implement the interface in its own library, link it through the
+umbrella library, and register its name in the pass's strategy factory.
+
 ## Adding another backend
 
 A new backend should follow the same boundary:

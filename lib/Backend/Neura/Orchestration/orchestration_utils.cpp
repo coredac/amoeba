@@ -3,7 +3,6 @@
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/IR/Builders.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -18,38 +17,12 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <string>
 #include <vector>
 
-using llvm::ArrayRef;
 using llvm::SmallVector;
 
 namespace mlir {
 namespace taskflow {
-
-// CgraShape member implementations
-
-std::string CgraShape::describe(int cgra_count) const {
-  std::string s = std::to_string(rows) + "x" + std::to_string(cols);
-  if (!is_rectangular) {
-    s += "(non-rect, " + std::to_string(cgra_count) + " CGRAs:";
-    for (auto &[c, r] : cgra_positions)
-      s += " (" + std::to_string(c) + "," + std::to_string(r) + ")";
-    s += ")";
-  }
-  return s;
-}
-
-std::string CgraShape::irAttr() const {
-  std::string s = std::to_string(rows) + "x" + std::to_string(cols);
-  if (!is_rectangular && !cgra_positions.empty()) {
-    s += "[";
-    for (auto &[c, r] : cgra_positions)
-      s += "(" + std::to_string(c) + "," + std::to_string(r) + ")";
-    s += "]";
-  }
-  return s;
-}
 
 // Internal helpers
 
@@ -176,95 +149,6 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
   return shapes;
 }
 
-// canAllTasksFitOnGrid
-
-bool canAllTasksFitOnGrid(ArrayRef<int> task_cgra_counts) {
-  constexpr int kTotalCGRAs = kCgraGridRows * kCgraGridCols;
-
-  // Quick capacity check: total CGRAs must not exceed grid size.
-  int total_cgras = 0;
-  for (int count : task_cgra_counts)
-    total_cgras += count;
-  if (total_cgras > kTotalCGRAs) {
-    return false;
-  }
-
-  // Simulates placement on a grid.
-  bool occupied[kCgraGridRows][kCgraGridCols] = {};
-
-  // Sorts tasks by descending cgra_count for better packing (largest-first
-  // decreasing, a standard bin-packing heuristic).  Each task may have a
-  // different cgra_count because the balance phase only increments one
-  // bottleneck at a time; this array reflects the heterogeneous orchestration
-  // across all tasks in the current trial configuration.
-  SmallVector<int> sorted_counts(task_cgra_counts.begin(),
-                                 task_cgra_counts.end());
-  llvm::sort(sorted_counts, [](int lhs, int rhs) { return lhs > rhs; });
-
-  for (int cgra_count : sorted_counts) {
-    SmallVector<CgraShape> candidates = getAllPlacementShapes(cgra_count);
-    bool placed = false;
-
-    for (const auto &shape : candidates) {
-      if (placed)
-        break;
-
-      if (shape.is_rectangular) {
-        // Rectangular: tries every origin where the rows×cols bbox fits.
-        for (int origin_row = 0;
-             origin_row <= kCgraGridRows - shape.rows && !placed;
-             ++origin_row) {
-          for (int origin_col = 0;
-               origin_col <= kCgraGridCols - shape.cols && !placed;
-               ++origin_col) {
-            bool fits = true;
-            for (int delta_row = 0; delta_row < shape.rows && fits; ++delta_row)
-              for (int delta_col = 0; delta_col < shape.cols && fits;
-                   ++delta_col)
-                if (occupied[origin_row + delta_row][origin_col + delta_col])
-                  fits = false;
-            if (fits) {
-              for (int delta_row = 0; delta_row < shape.rows; ++delta_row)
-                for (int delta_col = 0; delta_col < shape.cols; ++delta_col)
-                  occupied[origin_row + delta_row][origin_col + delta_col] =
-                      true;
-              placed = true;
-            }
-          }
-        }
-      } else {
-        // Non-rectangular: cgra_positions stores (col, row) offsets.
-        for (int origin_row = 0; origin_row < kCgraGridRows && !placed;
-             ++origin_row) {
-          for (int origin_col = 0; origin_col < kCgraGridCols && !placed;
-               ++origin_col) {
-            bool fits = true;
-            for (auto &[col_off, row_off] : shape.cgra_positions) {
-              int abs_row = origin_row + row_off;
-              int abs_col = origin_col + col_off;
-              if (abs_row < 0 || abs_row >= kCgraGridRows || abs_col < 0 ||
-                  abs_col >= kCgraGridCols || occupied[abs_row][abs_col]) {
-                fits = false;
-                break;
-              }
-            }
-            if (fits) {
-              for (auto &[col_off, row_off] : shape.cgra_positions)
-                occupied[origin_row + row_off][origin_col + col_off] = true;
-              placed = true;
-            }
-          }
-        }
-      }
-    }
-
-    if (!placed) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Task scheduling utilities
 
 // CGRA Grid Position (spatial + temporal)
@@ -295,12 +179,6 @@ struct CgraPosition {
   int manhattanDistance(const CgraPosition &other) const {
     return std::abs(row - other.row) + std::abs(col - other.col);
   }
-
-  // Returns true if the two positions are directly adjacent (Manhattan
-  // distance == 1), i.e. share an edge on the grid.
-  bool isAdjacent(const CgraPosition &other) const {
-    return manhattanDistance(other) == 1;
-  }
 };
 
 // Task Placement Info
@@ -308,29 +186,6 @@ struct CgraPosition {
 // A task can span one or more contiguous CGRAs (rectangular or non-rect).
 struct TaskPlacement {
   SmallVector<CgraPosition> cgra_positions; // CGRAs assigned to this task.
-
-  // Returns the primary (first) CGRA position.
-  CgraPosition primary() const {
-    return cgra_positions.empty() ? CgraPosition{-1, -1, 0, 0}
-                                  : cgra_positions[0];
-  }
-
-  // Returns the number of CGRAs assigned to this task.
-  size_t cgraCount() const { return cgra_positions.size(); }
-
-  // Returns true if any CGRA in this task is grid-adjacent to any CGRA
-  // in `other`, indicating that direct data forwarding between tasks is
-  // possible without going through the network.
-  bool hasTaskAdjacentCgra(const TaskPlacement &other) const {
-    for (const auto &pos : cgra_positions) {
-      for (const auto &other_pos : other.cgra_positions) {
-        if (pos.isAdjacent(other_pos)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
 };
 
 // Task-Memory Graph
