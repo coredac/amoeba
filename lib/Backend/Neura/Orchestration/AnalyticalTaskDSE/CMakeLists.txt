@@ -3,9 +3,12 @@ get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 add_mlir_library(MLIRAmoebaNeuraAnalyticalTaskDSE
   AnalyticalTaskCandidateCommon.cpp
   AnalyticalTaskCandidateManifest.cpp
+  AnalyticalTaskCostCatalog.cpp
+  AnalyzeRecResMiiPass.cpp
   EnumerateAnalyticalTaskCandidatesPass.cpp
   MaterializeAnalyticalTaskCandidatePass.cpp
   SpatialDSEOrchestration.cpp
+  ScoreAnalyticalTaskCandidatesPass.cpp
   SpatialTaskCandidateSpace.cpp
 
   PARTIAL_SOURCES_INTENDED

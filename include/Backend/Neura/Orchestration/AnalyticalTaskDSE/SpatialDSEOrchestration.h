@@ -40,6 +40,9 @@ public:
   getRectangularShapes(int cgraCount, int gridRows = kCgraGridRows,
                        int gridCols = kCgraGridCols);
 
+  // Reuse the production task order when estimating a candidate's makespan.
+  TaskPriorityMap computeRoutingCriticalPathPriority(func::FuncOp func) const;
+
   std::string getName() const override { return "analytical-dse-spatial"; }
 
 private:
@@ -54,8 +57,6 @@ private:
   int computeDependencyDepth(Operation *task, TaskSuccessorMap &successors,
                              llvm::DenseMap<Operation *, int> &depth_cache,
                              llvm::DenseSet<Operation *> &visiting) const;
-
-  TaskPriorityMap computeRoutingCriticalPathPriority(func::FuncOp func) const;
 
   int grid_rows_;
   int grid_cols_;
