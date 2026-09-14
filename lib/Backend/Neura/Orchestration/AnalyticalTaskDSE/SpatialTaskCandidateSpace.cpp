@@ -181,37 +181,6 @@ SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
   return result;
 }
 
-int64_t operationCappedMaximumPhysicalCgras(int64_t materializedOperationCount,
-                                            int64_t perCgraRows,
-                                            int64_t perCgraCols,
-                                            int64_t maxCgrasPerTask) {
-  if (perCgraRows <= 0 || perCgraCols <= 0 || maxCgrasPerTask <= 0 ||
-      perCgraRows > std::numeric_limits<int64_t>::max() / perCgraCols)
-    return 0;
-  int64_t tilesPerCgra = perCgraRows * perCgraCols;
-  int64_t count = std::max<int64_t>(1, materializedOperationCount);
-  int64_t cap = 1 + (count - 1) / tilesPerCgra;
-  int64_t halfFull = 1 + (tilesPerCgra - 1) / 2;
-  if (count >= halfFull)
-    cap = std::max<int64_t>(2, cap);
-  return std::min(maxCgrasPerTask, cap);
-}
-
-SmallVector<SmallVector<RectShape>> buildOperationCappedShapeAlphabets(
-    ArrayRef<TaskFact> tasks, ArrayRef<RectShape> shapes, int64_t perCgraRows,
-    int64_t perCgraCols, int64_t maxCgrasPerTask) {
-  SmallVector<SmallVector<RectShape>> result(tasks.size());
-  for (auto [taskIndex, task] : llvm::enumerate(tasks)) {
-    int64_t cap = operationCappedMaximumPhysicalCgras(
-        task.materializedOperationCount, perCgraRows, perCgraCols,
-        maxCgrasPerTask);
-    for (const RectShape &shape : shapes)
-      if (shape.cgraCount() <= cap)
-        result[taskIndex].push_back(shape);
-  }
-  return result;
-}
-
 bool ConcurrentPackingCache::canPack(ArrayRef<RectShape> shapes) {
   Key key;
   key.reserve(shapes.size());

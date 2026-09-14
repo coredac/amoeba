@@ -41,7 +41,6 @@ struct TaskFact {
   std::string name;
   std::string bodySha256;
   int64_t tripCount = 1;
-  int64_t materializedOperationCount = 0;
 };
 
 FailureOr<llvm::SmallVector<TaskFact>>

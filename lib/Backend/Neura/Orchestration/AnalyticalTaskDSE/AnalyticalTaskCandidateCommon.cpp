@@ -42,9 +42,11 @@ static std::string sha256(StringRef bytes) {
   return llvm::toHex(hasher.final(), /*LowerCase=*/true);
 }
 
-// Fingerprints the exact YAML selected by --architecture-spec. Dimensions
-// alone are insufficient because two same-sized machines can have different
-// FU, memory, latency, or routing capabilities.
+// Hashes the exact YAML selected by --architecture-spec. The architecture
+// hash is stored in the candidate manifest and checked by every downstream
+// consumer: same-sized machines can still differ in functional units,
+// memory, latency, or routing, so any YAML change invalidates candidates and
+// their derived predictions.
 FailureOr<std::string> currentArchitectureSha256(std::string &error) {
   StringRef path = mlir::amoeba::getNeuraArchitectureSpecFile();
   if (path.empty()) {
@@ -54,7 +56,7 @@ FailureOr<std::string> currentArchitectureSha256(std::string &error) {
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
       llvm::MemoryBuffer::getFile(path);
   if (!buffer) {
-    error = "cannot fingerprint architecture specification " + path.str() +
+    error = "cannot hash architecture specification " + path.str() +
             ": " + buffer.getError().message();
     return failure();
   }
@@ -86,10 +88,13 @@ static FailureOr<int64_t> resolveAnalyticalTripCount(TaskflowTaskOp task,
   return inferred->value_or(1);
 }
 
-// Produces a stable identity for the current task computation. We deliberately
-// remove DSE outputs and measurements so materializing a shape does not make
-// an otherwise identical task look new. A body edit, however, changes this
-// hash and invalidates an old candidate manifest.
+// Produces the task identity consumed by candidate and prediction manifests.
+// The enumerator writes this hash into each task record and attaches it to the
+// bound IR; materialization and the predictor use it to bind derived data to
+// the source task. A task-body edit changes the hash, so manifest validation
+// rejects old candidates and predictions. DSE outputs and measurements are
+// deliberately excluded so materializing or measuring a shape does not make
+// the same source computation look new.
 static std::string taskBodySha256(TaskflowTaskOp task) {
   Operation *clone = task->clone();
   auto destroyClone = llvm::make_scope_exit([&] { clone->destroy(); });
@@ -110,7 +115,8 @@ static std::string taskBodySha256(TaskflowTaskOp task) {
   return sha256(printed);
 }
 
-// Collects task names, operations, and available trip counts in walk order.
+// Collects task names, source-body identities, and available trip counts in
+// walk order.
 // The order is the task axis used by a spatial shape tuple, so duplicate names
 // are rejected before they can make candidate records ambiguous.
 FailureOr<SmallVector<TaskFact>>
@@ -126,18 +132,7 @@ collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
     FailureOr<int64_t> tripCount = resolveAnalyticalTripCount(task, error);
     if (failed(tripCount))
       return WalkResult::interrupt();
-    int64_t materializedOperationCount = 0;
-    task.walk([&](Operation *operation) {
-      StringRef opName = operation->getName().getStringRef();
-      if (!opName.starts_with("neura.") || opName == "neura.kernel" ||
-          opName == "neura.reserve" || opName == "neura.ctrl_mov" ||
-          opName == "neura.data_mov" || opName == "neura.yield" ||
-          opName == "neura.br" || opName == "neura.cond_br")
-        return;
-      ++materializedOperationCount;
-    });
-    tasks.push_back({task, std::move(name), taskBodySha256(task), *tripCount,
-                     materializedOperationCount});
+    tasks.push_back({task, std::move(name), taskBodySha256(task), *tripCount});
     return WalkResult::advance();
   });
   if (walkResult.wasInterrupted())

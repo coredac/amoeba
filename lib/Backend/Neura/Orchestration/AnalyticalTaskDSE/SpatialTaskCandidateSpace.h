@@ -33,7 +33,7 @@ inline constexpr llvm::StringLiteral kSearchScope =
 inline constexpr llvm::StringLiteral kSpatialCapacityPolicy =
     "all-tasks-simultaneous-exact-pack";
 inline constexpr llvm::StringLiteral kShapePruningPolicy =
-    "half-full-two-cgra-floor-then-ceil-ops-per-cgra";
+    "none";
 
 // Stores one physical-CGRA rectangle and its corresponding mapper dimensions.
 struct RectShape {
@@ -87,15 +87,6 @@ llvm::SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
                                                        int64_t perCgraRows,
                                                        int64_t perCgraCols,
                                                        int64_t maxCgrasPerTask);
-int64_t operationCappedMaximumPhysicalCgras(int64_t materializedOperationCount,
-                                            int64_t perCgraRows,
-                                            int64_t perCgraCols,
-                                            int64_t maxCgrasPerTask);
-llvm::SmallVector<llvm::SmallVector<RectShape>>
-buildOperationCappedShapeAlphabets(llvm::ArrayRef<TaskFact> tasks,
-                                   llvm::ArrayRef<RectShape> shapes,
-                                   int64_t perCgraRows, int64_t perCgraCols,
-                                   int64_t maxCgrasPerTask);
 // Visits every shape tuple that admits a simultaneous, non-overlapping
 // placement on the physical grid. `shapeIndices` follows task order and indexes
 // the corresponding task's shape alphabet; the valid candidate index is

@@ -111,15 +111,10 @@ struct EnumerateAnalyticalTaskCandidatesPass
       func.emitError() << "declared rectangular shape space is empty";
       return signalPassFailure();
     }
-    SmallVector<SmallVector<RectShape>> shapesByTask =
-        buildOperationCappedShapeAlphabets(
-            *taskFacts, shapes, architecture.getPerCgraRows(),
-            architecture.getPerCgraColumns(), effectiveMaxCgrasPerTask);
-    if (llvm::any_of(shapesByTask,
-                     [](const auto &values) { return values.empty(); })) {
-      func.emitError() << "operation-capped task shape space is empty";
-      return signalPassFailure();
-    }
+    // TODO: Introduce an explicit, validated shape-pruning policy after the
+    // complete rectangular space has a stable downstream contract.
+    SmallVector<SmallVector<RectShape>> shapesByTask(taskFacts->size(),
+                                                     shapes);
     FailureOr<std::string> architectureSha = currentArchitectureSha256(error);
     if (failed(architectureSha)) {
       func.emitError() << error;
@@ -171,8 +166,11 @@ struct EnumerateAnalyticalTaskCandidatesPass
         outputFile.getValue(),
         [&](llvm::raw_ostream &os) {
           // Freezes every input needed to reconstruct the candidate space. The
-          // cost-query list contains exactly the task/shape pairs referenced by
-          // at least one feasible candidate.
+          // architecture YAML hash and each source-task body hash bind this
+          // manifest to the exact machine and computation that the predictor
+          // and materializer consume. The cost-query list contains exactly
+          // the task/shape pairs referenced by at least one feasible
+          // candidate.
           llvm::json::Object architectureRecord;
           architectureRecord["grid_rows"] =
               int64_t{architecture.getMultiCgraRows()};
@@ -189,13 +187,6 @@ struct EnumerateAnalyticalTaskCandidatesPass
             record["task"] = task.name;
             record["body_sha256"] = task.bodySha256;
             record["trip_count"] = task.tripCount;
-            record["materialized_operation_count"] =
-                task.materializedOperationCount;
-            record["maximum_physical_cgras"] =
-                operationCappedMaximumPhysicalCgras(
-                    task.materializedOperationCount,
-                    architecture.getPerCgraRows(),
-                    architecture.getPerCgraColumns(), effectiveMaxCgrasPerTask);
             tasks.push_back(std::move(record));
           }
           llvm::json::Array costQueries;
@@ -276,10 +267,11 @@ struct EnumerateAnalyticalTaskCandidatesPass
       return signalPassFailure();
     }
 
-    // Publish the binding only after the complete manifest has been written.
-    // A failed or truncated enumeration therefore cannot leave IR that looks
-    // paired with a usable candidate file. The hash routine deliberately
-    // ignores this attribute, so re-enumerating this output is idempotent.
+    // Publish the source-task binding only after the complete manifest has
+    // been written. A failed or truncated enumeration therefore cannot leave
+    // IR that looks paired with a usable candidate file. The body-hash routine
+    // deliberately ignores this attribute, so re-enumerating this output is
+    // idempotent while any real task-body edit still invalidates the manifest.
     for (const TaskFact &task : *taskFacts)
       task.op->setAttr(kSourceTaskBodyShaAttr,
                        StringAttr::get(func.getContext(), task.bodySha256));
