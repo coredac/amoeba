@@ -178,6 +178,22 @@ def ScoreAnalyticalTaskCandidates
                            "mlir::taskflow::TaskflowDialect"];
 }
 
+def AnalyzeTaskPipelineInterval
+    : Pass<"analyze-task-pipeline-interval", "func::FuncOp"> {
+  let summary =
+      "Analyze the pipeline interval of scheduled Taskflow tasks";
+  let description = [{
+    Reads taskflow.task operations that contain profile_info.duration and
+    task_orchestration_info.cgra_positions. It reconstructs task data
+    dependences and per-CGRA context order, then writes
+    task_pipeline_interval_info on the parent func.func.
+  }];
+  let constructor =
+      "::mlir::amoeba::neura::createAnalyzeTaskPipelineIntervalPass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
 def FuseTask : Pass<"fuse-task", "func::FuncOp"> {
   let summary = "Fuse Taskflow tasks using Neura profitability metrics";
   let description = [{

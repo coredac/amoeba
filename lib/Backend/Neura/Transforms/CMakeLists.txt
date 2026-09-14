@@ -4,12 +4,14 @@ add_mlir_library(MLIRAmoebaNeuraTransforms
   ConstructHyperblockFromTaskPass.cpp
   ClassifyTaskAndCounterPass.cpp
   OrchestrateTasksOnAcceleratorsPass.cpp
+  AnalyzeTaskPipelineIntervalPass.cpp
 
   DEPENDS
   MLIRAmoebaNeuraBackendPassesIncGen
 
   LINK_LIBS PUBLIC
   MLIRAmoebaNeuraOrchestration
+  MLIRAmoebaNeuraPipelineInterval
   MLIRTaskflow
   MLIRNeura
   MLIRIR
