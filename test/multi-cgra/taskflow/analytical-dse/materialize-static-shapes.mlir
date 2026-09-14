@@ -1,10 +1,10 @@
-// A has both fixed orientations of two CGRAs; candidate 2 selects 2x1.
+// Candidate 6 selects the vertical two-CGRA shape for A and one CGRA for B.
 // RUN: mlir-amoeba-opt %s \
-// RUN:   '--enumerate-analytical-task-candidates=output=%t.candidates.jsonl' \
+// RUN:   '--enumerate-analytical-task-candidates=output=%t.candidates.jsonl max-cgras-per-task=2' \
 // RUN:   --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
 // RUN:   -o /dev/null
 // RUN: mlir-amoeba-opt %s \
-// RUN:   '--materialize-analytical-task-candidate=candidates=%t.candidates.jsonl candidate-id=candidate-2' \
+// RUN:   '--materialize-analytical-task-candidate=candidates=%t.candidates.jsonl candidate-id=candidate-6' \
 // RUN:   --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
 // RUN:   -o %t.materialized.mlir
 // RUN: FileCheck %s --input-file=%t.materialized.mlir --check-prefix=MATERIALIZED
@@ -75,7 +75,7 @@ module {
 }
 
 // MATERIALIZED-LABEL: func.func @main
-// MATERIALIZED-SAME: analytical_task_candidate_id = "candidate-2"
+// MATERIALIZED-SAME: analytical_task_candidate_id = "candidate-6"
 // MATERIALIZED: taskflow.task @A
 // MATERIALIZED-SAME: amoeba.analytical_shape_orientation_fixed
 // MATERIALIZED-SAME: cgra_count = 2 : i32
@@ -85,7 +85,7 @@ module {
 // MATERIALIZED-SAME: cgra_count = 1 : i32
 // MATERIALIZED-SAME: cgra_shape = "1x1"
 // ORCHESTRATED-LABEL: func.func @main
-// ORCHESTRATED-SAME: analytical_task_candidate_id = "candidate-2"
+// ORCHESTRATED-SAME: analytical_task_candidate_id = "candidate-6"
 // ORCHESTRATED: taskflow.task @A
 // ORCHESTRATED-NOT: amoeba.analytical_shape_orientation_fixed
 // ORCHESTRATED-SAME: cgra_positions = [{col = 0 : i32, context_id = 0 : i32, row = 0 : i32}, {col = 0 : i32, context_id = 0 : i32, row = 1 : i32}]

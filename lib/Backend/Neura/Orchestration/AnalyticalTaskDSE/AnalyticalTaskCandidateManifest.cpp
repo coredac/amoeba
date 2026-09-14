@@ -133,11 +133,12 @@ static bool parseHeader(const llvm::json::Object &object,
   return true;
 }
 
-// Verifies that the manifest task list has the same names, canonical bodies,
-// trip-count facts, and operation-derived shape caps as the current IR.
+// Bind every saved shape choice to the task computation it was enumerated for.
+// The task-body SHA-256 is recomputed from the current IR, so a manifest made
+// before a task-body edit cannot be applied to the changed task. Trip count is
+// deliberately excluded from that canonical body hash and checked separately.
 static bool validateHeaderTasks(const llvm::json::Object &object,
                                 ArrayRef<TaskFact> tasks,
-                                const ManifestHeader &header,
                                 std::string &error) {
   const llvm::json::Array *records = object.getArray("tasks");
   if (!records || records->size() != tasks.size()) {
@@ -153,24 +154,12 @@ static bool validateHeaderTasks(const llvm::json::Object &object,
     auto name = requiredString(*record, "task", error);
     auto bodySha = requiredString(*record, "body_sha256", error);
     int64_t tripCount = 0;
-    auto materializedOperationCount =
-        requiredInteger(*record, "materialized_operation_count", error);
-    auto maximumPhysicalCgras =
-        requiredInteger(*record, "maximum_physical_cgras", error);
-    if (!name || !bodySha || !materializedOperationCount ||
-        !maximumPhysicalCgras ||
-        !parseTripCountFact(*record, tripCount, error)) {
+    if (!name || !bodySha || !parseTripCountFact(*record, tripCount, error)) {
       return false;
     }
-    int64_t expectedMaximumPhysicalCgras = operationCappedMaximumPhysicalCgras(
-        tasks[index].materializedOperationCount, header.perCgraRows,
-        header.perCgraCols, header.maxCgrasPerTask);
     if (!isSha256(*bodySha) || *name != tasks[index].name ||
         *bodySha != tasks[index].bodySha256 ||
-        tripCount != tasks[index].tripCount ||
-        *materializedOperationCount !=
-            tasks[index].materializedOperationCount ||
-        *maximumPhysicalCgras != expectedMaximumPhysicalCgras) {
+        tripCount != tasks[index].tripCount) {
       error = "candidate manifest header task facts do not match current IR";
       return false;
     }
@@ -330,8 +319,10 @@ hasExactPackableCandidateCount(uint64_t declaredCount,
   return completed && !exceededDeclaredCount && computedCount == declaredCount;
 }
 
-// Compares both architecture dimensions and the exact YAML bytes. The hash
-// catches capability or latency changes that dimensions alone cannot see.
+// Bind the manifest to the exact architecture YAML selected at enumeration.
+// Rehashing its raw bytes here rejects a same-sized machine whose functional
+// units, memory, routing, or latency configuration has changed: the shapes
+// may still fit geometrically, but their mapper costs cannot be reused safely.
 static bool architectureMatches(const ManifestHeader &header,
                                 const ::mlir::neura::Architecture &architecture,
                                 std::string &error) {
@@ -397,7 +388,7 @@ bool readCandidateManifest(StringRef path, ArrayRef<TaskFact> tasks,
     if (*recordType == "header") {
       if (sawHeader || count != 0 || sawFooter ||
           !parseHeader(*object, header, error) ||
-          !validateHeaderTasks(*object, tasks, header, error)) {
+          !validateHeaderTasks(*object, tasks, error)) {
         if (error.empty()) {
           error = "candidate manifest header is misplaced or duplicated";
         }
@@ -413,12 +404,11 @@ bool readCandidateManifest(StringRef path, ArrayRef<TaskFact> tasks,
       SmallVector<RectShape> legalShapes = enumerateStaticRectShapes(
           header.gridRows, header.gridCols, header.perCgraRows,
           header.perCgraCols, header.maxCgrasPerTask);
-      legalShapesByTask = buildOperationCappedShapeAlphabets(
-          tasks, legalShapes, header.perCgraRows, header.perCgraCols,
-          header.maxCgrasPerTask);
-      if (legalShapes.empty() ||
-          llvm::any_of(legalShapesByTask,
-                       [](const auto &shapes) { return shapes.empty(); })) {
+      // Reconstruct the same full rectangular alphabet for every task. The
+      // only per-task size bound is the manifest's explicit/physical maximum;
+      // operation counts cannot silently remove candidate shapes here.
+      legalShapesByTask.assign(tasks.size(), legalShapes);
+      if (legalShapes.empty()) {
         error = "candidate manifest declares an empty shape space";
         return false;
       }

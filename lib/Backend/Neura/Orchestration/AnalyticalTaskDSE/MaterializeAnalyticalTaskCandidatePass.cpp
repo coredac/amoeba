@@ -74,8 +74,10 @@ struct MaterializeAnalyticalTaskCandidatePass
       func.emitError() << error;
       return signalPassFailure();
     }
-    // Continues through the footer after finding the requested record. This
-    // validates the complete manifest and detects any second match.
+    // Continues through the footer after finding the requested record. The
+    // reader also rechecks task-body and architecture hashes against this IR
+    // and the selected YAML, so a shape cannot be replayed from a stale source
+    // task or an incompatible machine specification.
     std::optional<Candidate> selected;
     ManifestHeader header;
     ManifestFooter footer;
