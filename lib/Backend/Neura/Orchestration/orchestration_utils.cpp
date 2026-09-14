@@ -3,7 +3,6 @@
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/IR/Builders.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -14,40 +13,16 @@
 #include <cassert>
 #include <climits>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
-#include <string>
 #include <vector>
 
-using llvm::ArrayRef;
 using llvm::SmallVector;
 
 namespace mlir {
 namespace taskflow {
-
-// CgraShape member implementations
-
-std::string CgraShape::describe(int cgra_count) const {
-  std::string s = std::to_string(rows) + "x" + std::to_string(cols);
-  if (!is_rectangular) {
-    s += "(non-rect, " + std::to_string(cgra_count) + " CGRAs:";
-    for (auto &[c, r] : cgra_positions)
-      s += " (" + std::to_string(c) + "," + std::to_string(r) + ")";
-    s += ")";
-  }
-  return s;
-}
-
-std::string CgraShape::irAttr() const {
-  std::string s = std::to_string(rows) + "x" + std::to_string(cols);
-  if (!is_rectangular && !cgra_positions.empty()) {
-    s += "[";
-    for (auto &[c, r] : cgra_positions)
-      s += "(" + std::to_string(c) + "," + std::to_string(r) + ")";
-    s += "]";
-  }
-  return s;
-}
 
 // Internal helpers
 
@@ -174,95 +149,6 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
   return shapes;
 }
 
-// canAllTasksFitOnGrid
-
-bool canAllTasksFitOnGrid(ArrayRef<int> task_cgra_counts) {
-  constexpr int kTotalCGRAs = kCgraGridRows * kCgraGridCols;
-
-  // Quick capacity check: total CGRAs must not exceed grid size.
-  int total_cgras = 0;
-  for (int count : task_cgra_counts)
-    total_cgras += count;
-  if (total_cgras > kTotalCGRAs) {
-    return false;
-  }
-
-  // Simulates placement on a grid.
-  bool occupied[kCgraGridRows][kCgraGridCols] = {};
-
-  // Sorts tasks by descending cgra_count for better packing (largest-first
-  // decreasing, a standard bin-packing heuristic).  Each task may have a
-  // different cgra_count because the balance phase only increments one
-  // bottleneck at a time; this array reflects the heterogeneous orchestration
-  // across all tasks in the current trial configuration.
-  SmallVector<int> sorted_counts(task_cgra_counts.begin(),
-                                 task_cgra_counts.end());
-  llvm::sort(sorted_counts, [](int lhs, int rhs) { return lhs > rhs; });
-
-  for (int cgra_count : sorted_counts) {
-    SmallVector<CgraShape> candidates = getAllPlacementShapes(cgra_count);
-    bool placed = false;
-
-    for (const auto &shape : candidates) {
-      if (placed)
-        break;
-
-      if (shape.is_rectangular) {
-        // Rectangular: tries every origin where the rows×cols bbox fits.
-        for (int origin_row = 0;
-             origin_row <= kCgraGridRows - shape.rows && !placed;
-             ++origin_row) {
-          for (int origin_col = 0;
-               origin_col <= kCgraGridCols - shape.cols && !placed;
-               ++origin_col) {
-            bool fits = true;
-            for (int delta_row = 0; delta_row < shape.rows && fits; ++delta_row)
-              for (int delta_col = 0; delta_col < shape.cols && fits;
-                   ++delta_col)
-                if (occupied[origin_row + delta_row][origin_col + delta_col])
-                  fits = false;
-            if (fits) {
-              for (int delta_row = 0; delta_row < shape.rows; ++delta_row)
-                for (int delta_col = 0; delta_col < shape.cols; ++delta_col)
-                  occupied[origin_row + delta_row][origin_col + delta_col] =
-                      true;
-              placed = true;
-            }
-          }
-        }
-      } else {
-        // Non-rectangular: cgra_positions stores (col, row) offsets.
-        for (int origin_row = 0; origin_row < kCgraGridRows && !placed;
-             ++origin_row) {
-          for (int origin_col = 0; origin_col < kCgraGridCols && !placed;
-               ++origin_col) {
-            bool fits = true;
-            for (auto &[col_off, row_off] : shape.cgra_positions) {
-              int abs_row = origin_row + row_off;
-              int abs_col = origin_col + col_off;
-              if (abs_row < 0 || abs_row >= kCgraGridRows || abs_col < 0 ||
-                  abs_col >= kCgraGridCols || occupied[abs_row][abs_col]) {
-                fits = false;
-                break;
-              }
-            }
-            if (fits) {
-              for (auto &[col_off, row_off] : shape.cgra_positions)
-                occupied[origin_row + row_off][origin_col + col_off] = true;
-              placed = true;
-            }
-          }
-        }
-      }
-    }
-
-    if (!placed) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Task scheduling utilities
 
 // CGRA Grid Position (spatial + temporal)
@@ -293,12 +179,6 @@ struct CgraPosition {
   int manhattanDistance(const CgraPosition &other) const {
     return std::abs(row - other.row) + std::abs(col - other.col);
   }
-
-  // Returns true if the two positions are directly adjacent (Manhattan
-  // distance == 1), i.e. share an edge on the grid.
-  bool isAdjacent(const CgraPosition &other) const {
-    return manhattanDistance(other) == 1;
-  }
 };
 
 // Task Placement Info
@@ -306,29 +186,6 @@ struct CgraPosition {
 // A task can span one or more contiguous CGRAs (rectangular or non-rect).
 struct TaskPlacement {
   SmallVector<CgraPosition> cgra_positions; // CGRAs assigned to this task.
-
-  // Returns the primary (first) CGRA position.
-  CgraPosition primary() const {
-    return cgra_positions.empty() ? CgraPosition{-1, -1, 0, 0}
-                                  : cgra_positions[0];
-  }
-
-  // Returns the number of CGRAs assigned to this task.
-  size_t cgraCount() const { return cgra_positions.size(); }
-
-  // Returns true if any CGRA in this task is grid-adjacent to any CGRA
-  // in `other`, indicating that direct data forwarding between tasks is
-  // possible without going through the network.
-  bool hasTaskAdjacentCgra(const TaskPlacement &other) const {
-    for (const auto &pos : cgra_positions) {
-      for (const auto &other_pos : other.cgra_positions) {
-        if (pos.isAdjacent(other_pos)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
 };
 
 // Task-Memory Graph
@@ -469,13 +326,13 @@ private:
 //
 // Uses a two-phase fixed-point iteration:
 //   Phase 1: Place tasks on the grid (scoring by SSA + memory proximity),
-//            processing tasks in priority order.
+//            processing tasks in dependency-ready priority order.
 //   Phase 2: Assign each MemRef to the nearest SRAM given task positions.
 // Iterates until SRAM assignments converge.
 //
 // In SpatialTemporal mode, ASAP scheduling is applied via
-// computeEarliestStartTime() so that each task starts as soon as all explicit
-// taskflow dependencies have completed.
+// computeEarliestStartTime() so that each ready task starts as soon as all
+// explicit taskflow dependencies have completed.
 TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode)
     : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {
   cgra_occupancy_.resize(grid_rows_);
@@ -504,25 +361,62 @@ bool TaskScheduler::schedule(func::FuncOp func,
     return true;
   }
 
-  // Sorts tasks by orchestration-provided priority. The scheduler does not
-  // infer a critical path; orchestration algorithms provide that policy.
-  SmallVector<TaskNode *> sorted_tasks;
-  for (auto &node : graph.task_nodes) {
-    sorted_tasks.push_back(node.get());
-  }
   auto getPriority = [&](TaskNode *node) {
     auto it = priority.find(node->op.getOperation());
     return it == priority.end() ? 0 : it->second;
   };
-  std::stable_sort(sorted_tasks.begin(), sorted_tasks.end(),
-                   [&](TaskNode *a, TaskNode *b) {
-                     int a_priority = getPriority(a);
-                     int b_priority = getPriority(b);
-                     if (a_priority != b_priority) {
-                       return a_priority > b_priority;
-                     }
-                     return a->id < b->id;
-                   });
+
+  // Build a dependency-respecting placement order. Orchestration algorithms
+  // still control priority, but priority is only used to choose among tasks
+  // whose explicit taskflow predecessors have already been placed.
+  SmallVector<int> remaining_predecessors(graph.task_nodes.size(), 0);
+  SmallVector<TaskNode *> ready_tasks;
+  for (auto &node : graph.task_nodes) {
+    remaining_predecessors[node->id] =
+        static_cast<int>(node->ssa_operands.size());
+    if (remaining_predecessors[node->id] == 0) {
+      ready_tasks.push_back(node.get());
+    }
+  }
+
+  auto isHigherPriority = [&](TaskNode *lhs, TaskNode *rhs) {
+    int lhs_priority = getPriority(lhs);
+    int rhs_priority = getPriority(rhs);
+    if (lhs_priority != rhs_priority) {
+      return lhs_priority > rhs_priority;
+    }
+    return lhs->id < rhs->id;
+  };
+
+  SmallVector<TaskNode *> sorted_tasks;
+  sorted_tasks.reserve(graph.task_nodes.size());
+  while (!ready_tasks.empty()) {
+    auto best_it = ready_tasks.begin();
+    for (auto it = ready_tasks.begin() + 1; it != ready_tasks.end(); ++it) {
+      if (isHigherPriority(*it, *best_it)) {
+        best_it = it;
+      }
+    }
+
+    TaskNode *task_node = *best_it;
+    ready_tasks.erase(best_it);
+    sorted_tasks.push_back(task_node);
+
+    for (TaskNode *user : task_node->ssa_users) {
+      int &remaining = remaining_predecessors[user->id];
+      assert(remaining > 0 &&
+             "Task dependency bookkeeping should not underflow.\n");
+      --remaining;
+      if (remaining == 0) {
+        ready_tasks.push_back(user);
+      }
+    }
+  }
+
+  if (sorted_tasks.size() != graph.task_nodes.size()) {
+    func.emitError() << "task dependencies form a cycle";
+    return false;
+  }
 
   // Fixed-point iteration: placement scoring depends on SRAM positions, and
   // SRAM assignment depends on task positions.  Converges when SRAMs are
@@ -535,6 +429,7 @@ bool TaskScheduler::schedule(func::FuncOp func,
   // grid area (grid_rows_ * grid_cols_) is much smaller than task_count
   // (e.g. 5 tasks on a 1x1 grid).
   total_task_count_ = static_cast<int>(sorted_tasks.size());
+  updateScheduleTimeScale(graph);
 
   for (int iter = 0; iter < kMaxIterations; ++iter) {
     if (iter > 0) {
@@ -550,10 +445,9 @@ bool TaskScheduler::schedule(func::FuncOp func,
 
       TaskPlacement placement = findBestPlacement(task_node, cgra_count, graph);
 
-      assert(!placement.cgra_positions.empty() &&
-             "findBestPlacement must succeed: cgra_count should be "
-             "validated by the upstream resource-aware optimization pass "
-             "or manually assigned resource binding attributes");
+      if (placement.cgra_positions.empty()) {
+        return false;
+      }
 
       for (const auto &pos : placement.cgra_positions) {
         task_node->placement.push_back(pos);
@@ -699,6 +593,31 @@ bool TaskScheduler::schedule(func::FuncOp func,
   return true;
 }
 
+void TaskScheduler::updateScheduleTimeScale(const TaskMemoryGraph &graph) {
+  // TaskScheduler only needs an internal time axis to decide whether two tasks
+  // overlap on the same CGRA during placement.  Real profiled latencies can be
+  // very large, so using them directly makes the temporal search horizon huge
+  // and can overflow integer arithmetic.  Scale only this internal occupancy
+  // duration; preserve the original profile_info.duration values for
+  // downstream consumers.
+  constexpr int64_t kMaxInternalDuration = 1000000;
+  int64_t max_duration = 1;
+  for (const auto &task_node : graph.task_nodes) {
+    max_duration =
+        std::max(max_duration, static_cast<int64_t>(task_node->getDuration()));
+  }
+  schedule_time_scale_ = static_cast<int>(std::max<int64_t>(
+      1, llvm::divideCeil(max_duration, kMaxInternalDuration)));
+}
+
+int TaskScheduler::getScheduleDuration(const TaskNode *task_node) const {
+  assert(schedule_time_scale_ > 0 &&
+         "Scheduler time scale must be positive.\n");
+  return std::max(1, static_cast<int>(llvm::divideCeil(
+                         static_cast<int64_t>(task_node->getDuration()),
+                         static_cast<int64_t>(schedule_time_scale_))));
+}
+
 bool TaskScheduler::posInBounds(const CgraPosition &pos) const {
   return pos.row >= 0 && pos.row < this->grid_rows_ && pos.col >= 0 &&
          pos.col < this->grid_cols_;
@@ -812,22 +731,27 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
     shapes_to_try = getAllPlacementShapes(cgra_count);
   }
 
-  int task_duration = task_node->getDuration();
+  int task_duration = getScheduleDuration(task_node);
 
-  int t_start = (mode_ == SchedulingMode::SpatialTemporal)
-                    ? computeEarliestStartTime(task_node)
-                    : 0;
+  int64_t t_start = (mode_ == SchedulingMode::SpatialTemporal)
+                        ? computeEarliestStartTime(task_node)
+                        : 0;
   // Time horizon: at minimum every task gets one sequential slot per cell.
   // grid_area is the number of CGRA cells in the multi-CGRA grid.
   // For large grids task_count << grid_area, grid_area is enough.
   // For small grids (e.g. 1x1 with 5 tasks) task_count dominates.
   int grid_area = grid_rows_ * grid_cols_;
   int max_time_slots = std::max(grid_area, total_task_count_);
-  int t_max = (mode_ == SchedulingMode::SpatialTemporal)
-                  ? t_start + max_time_slots * task_duration
-                  : 0;
+  int64_t t_max =
+      (mode_ == SchedulingMode::SpatialTemporal)
+          ? t_start + static_cast<int64_t>(max_time_slots) * task_duration
+          : 0;
 
-  for (int t = t_start; t <= t_max; t += task_duration) {
+  for (int64_t t = t_start; t <= t_max; t += task_duration) {
+    if (t > std::numeric_limits<int>::max() - task_duration) {
+      break;
+    }
+    int t_start_int = static_cast<int>(t);
     int best_score = INT_MIN;
     TaskPlacement best_at_t;
 
@@ -853,12 +777,12 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
             int abs_col = origin_col + col_off;
             if (abs_row < 0 || abs_row >= grid_rows_ || abs_col < 0 ||
                 abs_col >= grid_cols_ ||
-                isOccupied(abs_row, abs_col, t, task_duration)) {
+                isOccupied(abs_row, abs_col, t_start_int, task_duration)) {
               valid = false;
               break;
             }
             candidate.cgra_positions.push_back(
-                {abs_row, abs_col, t, task_duration, 0});
+                {abs_row, abs_col, t_start_int, task_duration, 0});
           }
           if (!valid) {
             continue;

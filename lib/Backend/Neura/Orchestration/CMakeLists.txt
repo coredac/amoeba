@@ -1,14 +1,31 @@
-get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
+add_mlir_library(MLIRAmoebaNeuraOrchestrationUtil
+    orchestration_utils.cpp
+
+    PARTIAL_SOURCES_INTENDED
+
+    DEPENDS
+    MLIRAmoebaNeuraBackendPassesIncGen
+
+    LINK_LIBS PUBLIC
+    MLIRIR
+    MLIRPass
+    MLIRSupport
+    MLIRFuncDialect
+    MLIRTaskflow
+    LLVMSupport
+)
+
+add_subdirectory(RoutingCriticalPathOrchestration)
 
 add_mlir_library(MLIRAmoebaNeuraOrchestration
-  orchestration_utils.cpp
-  RoutingCriticalPathOrchestration/RoutingCriticalPathOrchestration.cpp
+    Orchestration.cpp
 
-  LINK_LIBS PUBLIC
-  MLIRTaskflow
-  MLIRIR
-  MLIRPass
-  MLIRSupport
-  ${dialect_libs}
-  LLVMSupport
+    PARTIAL_SOURCES_INTENDED
+
+    DEPENDS
+    MLIRAmoebaNeuraBackendPassesIncGen
+
+    LINK_LIBS PUBLIC
+    MLIRAmoebaNeuraOrchestrationUtil
+    MLIRAmoebaNeuraRoutingCriticalPathOrchestration
 )

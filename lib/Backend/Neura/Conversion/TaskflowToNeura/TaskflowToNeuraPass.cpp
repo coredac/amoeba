@@ -197,7 +197,7 @@ struct HyperblockToKernelPattern
     neura::KernelOp kernelOp = rewriter.create<neura::KernelOp>(
         loc, resultTypes, kernel_inputs, iter_args_init,
         /*Optional cgra_id*/ nullptr, /*Optional kernel_name*/ nullptr,
-        /*Optional accelerator*/ nullptr);
+        /*Optional accelerator*/ nullptr, /*Optional kernel_metadata*/ nullptr);
 
     // Creates the entry block for kernel.
     Region &kernel_region = kernelOp.getBody();
@@ -344,7 +344,8 @@ struct InternalizeCounterPattern : public OpRewritePattern<neura::KernelOp> {
         loc, result_types, new_inputs, iter_args_init,
         /*cgra_id=*/kernel_op.getCgraIdAttr(),
         /*kernel_name=*/kernel_op.getKernelNameAttr(),
-        /*accelerator=*/kernel_op.getAcceleratorAttr());
+        /*accelerator=*/kernel_op.getAcceleratorAttr(),
+        /*kernel_metadata=*/kernel_op.getKernelMetadataAttr());
 
     // Creates the entry block for new kernel.
     Region &new_region = new_kernel_op.getBody();
