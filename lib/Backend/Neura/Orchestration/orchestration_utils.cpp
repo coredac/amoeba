@@ -3,6 +3,7 @@
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -349,9 +350,11 @@ private:
 // computeEarliestStartTime() so that each ready task starts as soon as all
 // explicit taskflow dependencies have completed.
 TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode,
-                             ShapeSelectionPolicy shape_selection_policy)
+                             ShapeSelectionPolicy shape_selection_policy,
+                             bool comm_aware)
     : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode),
-      shape_selection_policy_(shape_selection_policy) {
+      shape_selection_policy_(shape_selection_policy),
+      comm_aware_(comm_aware) {
   cgra_occupancy_.resize(grid_rows_);
   for (auto &row : cgra_occupancy_) {
     row.resize(grid_cols_);
@@ -1154,15 +1157,23 @@ SmallVector<CgraShape> TaskScheduler::rotationsOf(const CgraShape &base) {
 //                   task in a different context.
 //
 // Higher score is better; 0 means all neighbours are co-located.
-int TaskScheduler::computeScore(TaskNode *task_node,
-                                const TaskPlacement &placement,
-                                TaskMemoryGraph &graph) {
+int64_t TaskScheduler::computeScore(TaskNode *task_node,
+                                    const TaskPlacement &placement,
+                                    TaskMemoryGraph &graph) {
   // Weight constants (tunable).
   constexpr int kAlpha = 10;   // SSA proximity weight.
   constexpr int kBeta = 50;    // Memory proximity weight (high priority).
   constexpr int kGamma = 1000; // Context switch cost is higher than NoC.
 
-  int ssa_score = 0, mem_score = 0, context_reuse_penalty = 0;
+  auto memrefElementCount = [](MemoryNode *mem) -> int64_t {
+    if (auto shaped_type = llvm::dyn_cast<ShapedType>(mem->memref.getType())) {
+      if (shaped_type.hasStaticShape())
+        return std::max<int64_t>(1, shaped_type.getNumElements());
+    }
+    return 1;
+  };
+
+  int64_t ssa_score = 0, mem_score = 0, context_reuse_penalty = 0;
 
   auto minDistToPlacement = [&](const SmallVector<CgraPosition> &other) -> int {
     int min_dist = INT_MAX;
@@ -1196,17 +1207,21 @@ int TaskScheduler::computeScore(TaskNode *task_node,
   }
 
   // 2. Memory proximity — penalise distance to assigned SRAMs.
-  // For read memrefs (data sources).
+  // A communication-aware schedule weights each memory-proximity penalty by
+  // the static number of elements transferred by that memref. Dynamic or
+  // unshaped values retain the legacy unit weight.
   for (MemoryNode *mem : task_node->read_memrefs) {
     if (mem->assigned_sram_pos) {
-      mem_score -= minDistToTarget(*mem->assigned_sram_pos);
+      int64_t transfer_volume = comm_aware_ ? memrefElementCount(mem) : 1;
+      mem_score -= transfer_volume * minDistToTarget(*mem->assigned_sram_pos);
     }
   }
   // For write memrefs: if the SRAM is already assigned (e.g. read by a
   // previous task), we want to be close to it too.
   for (MemoryNode *mem : task_node->write_memrefs) {
     if (mem->assigned_sram_pos) {
-      mem_score -= minDistToTarget(*mem->assigned_sram_pos);
+      int64_t transfer_volume = comm_aware_ ? memrefElementCount(mem) : 1;
+      mem_score -= transfer_volume * minDistToTarget(*mem->assigned_sram_pos);
     }
   }
 

@@ -107,7 +107,8 @@ public:
   TaskScheduler(int grid_rows = kCgraGridRows, int grid_cols = kCgraGridCols,
                 SchedulingMode mode = SchedulingMode::SpatialTemporal,
                 ShapeSelectionPolicy shape_selection_policy =
-                    ShapeSelectionPolicy::LegacyRotations);
+                    ShapeSelectionPolicy::LegacyRotations,
+                bool comm_aware = false);
 
   // Schedules and places all Taskflow tasks in `func` using the caller-provided
   // task priority map.
@@ -168,13 +169,14 @@ private:
 
   // Scores a candidate placement using proximity to dependent tasks, assigned
   // SRAMs, and context reuse cost.
-  int computeScore(TaskNode *task_node, const TaskPlacement &placement,
-                   TaskMemoryGraph &graph);
+  int64_t computeScore(TaskNode *task_node, const TaskPlacement &placement,
+                       TaskMemoryGraph &graph);
 
   int grid_rows_;
   int grid_cols_;
   SchedulingMode mode_;
   ShapeSelectionPolicy shape_selection_policy_;
+  bool comm_aware_ = false;
   int total_task_count_ = 0;
   int64_t schedule_time_scale_ = 1;
   int64_t schedule_makespan_ = 0;

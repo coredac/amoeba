@@ -64,7 +64,10 @@ def OrchestrateTasksOnAccelerators
       "orchestrationStrategy", "orchestration-strategy", "std::string",
       /*default=*/"\"routing-critical-path\"",
       "Task orchestration strategy: 'routing-critical-path' (default) or "
-      "'analytical-dse-spatial' (requires a materialized analytical task candidate).">];
+      "'analytical-dse-spatial' (requires a materialized analytical task candidate).">,
+    Option<
+      "commAware", "comm-aware", "bool", /*default=*/"false",
+      "Weight each memory-proximity penalty by transferred data volume.">];
   let constructor =
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
