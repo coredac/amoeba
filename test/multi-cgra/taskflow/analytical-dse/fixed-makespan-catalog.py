@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 def sha256(path):
+    """Hash the exact test artifact bytes used by the next pipeline stage."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -17,7 +18,13 @@ def read_jsonl(path):
 
 def create(manifest_path, catalog_path):
     header = read_jsonl(manifest_path)[0]
+    # The manifest already carries the architecture YAML fingerprint computed
+    # by the pass.  The fixture copies it into catalogue provenance so the
+    # scorer can reject a catalogue for another same-sized machine.
     architecture_sha = header["architecture"]["spec_sha256"]
+    # Task body hashes identify the current task IR after DSE-only attributes
+    # are removed.  Trip counts remain separate task facts and are not folded
+    # into this body identity.
     task_hashes = {
         task["task"]: task["body_sha256"] for task in header["tasks"]
     }
@@ -26,9 +33,15 @@ def create(manifest_path, catalog_path):
         "function": header["function"],
         "namespace": "fixed-five-cycle-test",
         "predictor_metadata": {
+            # Bind this catalogue to the exact JSONL manifest, including its
+            # candidate order and footer, rather than to an equivalent parsed
+            # object.
             "candidate_manifest_sha256": sha256(manifest_path),
             "analytical_provenance": {
                 "architecture_sha256": architecture_sha,
+                # These are schema-valid fixture identities.  The production
+                # Python adapter replaces them with hashes of the executable,
+                # DFG reports, model weights, and model configuration files.
                 "neura_opt_sha256": "0" * 64,
                 "task_body_sha256": task_hashes,
                 "task_dfg_sha256": {task: "1" * 64 for task in task_hashes},
@@ -67,6 +80,8 @@ def create(manifest_path, catalog_path):
 
 def verify(manifest_path, catalog_path, score_path):
     header, score, footer = read_jsonl(score_path)
+    # The score header is the driver's final provenance handoff: it must name
+    # the exact candidate manifest and cost catalogue files being replayed.
     assert header["candidate_manifest_sha256"] == sha256(manifest_path)
     assert header["cost_catalog_sha256"] == sha256(catalog_path)
     assert header["score_model"] == "spatial-temporal-scheduler-makespan"

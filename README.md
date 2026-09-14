@@ -205,9 +205,26 @@ makespan. Each task duration is
 whole cycles and runs the same
 fixed-orientation scheduler and task priority used for materialization.
 Enumeration requires concrete trip counts and rectangular shapes. The default
-`--max-cgras-per-task 0` considers the whole physical grid before per-task
-operation-count pruning. Communication volume, fusion, fission, and tiling are
-not candidate axes in this spatial search.
+`--max-cgras-per-task 0` considers the whole physical grid, and the enumerator
+keeps every legal fixed-orientation rectangle in that range. Communication
+volume, fusion, fission, and tiling are not candidate axes in this spatial
+search.
+
+The DSE artifacts carry explicit SHA-256 provenance. `candidate_manifest_sha256`
+is the hash of the exact candidate JSONL bytes, so a cost catalogue cannot be
+reused after candidate order or contents change. `architecture_sha256` is the
+hash of the exact architecture YAML bytes; grid dimensions alone do not
+identify routing, functional-unit, memory, or latency capabilities. Each
+`task_body_sha256` binds predictor costs to the current task IR after
+DSE-generated attributes are removed; the task's trip count is kept as a
+separate fact because it changes duration rather than the task computation.
+`task_dfg_sha256` identifies the extracted DFG report used by the predictor.
+The Python adapter binds that report, the Neura executable, model/checkpoint
+weights, and their configuration files to their hashes; the C++ scorer validates
+the declarations but does not reopen those producer files. The score header
+repeats the candidate, architecture, and exact cost-catalogue hashes so the
+driver can verify the complete chain immediately before materializing a
+shortlist.
 
 ## Tests
 

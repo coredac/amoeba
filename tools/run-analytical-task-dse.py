@@ -38,6 +38,13 @@ class PipelineError(RuntimeError):
 
 
 def _sha256_file(path: Path) -> str:
+    """Fingerprint the exact bytes consumed by an artifact stage.
+
+    The hashes in the candidate, cost, and score headers are content
+    identities, so this intentionally reads raw bytes rather than parsing and
+    re-serializing JSON.  That preserves record order and serialization
+    choices as part of the provenance chain.
+    """
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -157,7 +164,8 @@ def _require_bound_trip_counts(path: Path) -> None:
 
 
 def _read_shortlist(path: Path, candidate_manifest: Path,
-                    cost_catalog: Path) -> List[Mapping[str, object]]:
+                    cost_catalog: Path,
+                    architecture: Path) -> List[Mapping[str, object]]:
     """Validate the complete score artifact chain before replaying any ID."""
     header = None
     footer = None
@@ -202,12 +210,23 @@ def _read_shortlist(path: Path, candidate_manifest: Path,
     catalog = _read_json_object(cost_catalog, "cost catalogue")
     if catalog.get("schema") != COST_SCHEMA:
         raise PipelineError("cost catalogue schema mismatch")
+    architecture_sha = _sha256_file(architecture)
+    candidate_architecture = candidate_header.get("architecture")
+    if not isinstance(candidate_architecture, dict):
+        raise PipelineError("candidate manifest architecture metadata is invalid")
+    # The score header must point to the exact candidate JSONL, cost JSON, and
+    # architecture YAML that this driver is about to trust.  C++ has already
+    # compared the architecture identity while scoring; the driver repeats the
+    # artifact checks at this final handoff so a stale score file cannot replay
+    # a new shortlist.
     if (
         header.get("candidate_schema") != CANDIDATE_SCHEMA
         or header.get("score_model") != SCORE_MODEL
         or header.get("candidate_manifest_sha256")
         != _sha256_file(candidate_manifest)
         or header.get("cost_catalog_sha256") != _sha256_file(cost_catalog)
+        or header.get("architecture_sha256") != architecture_sha
+        or candidate_architecture.get("spec_sha256") != architecture_sha
         or header.get("cost_namespace") != catalog.get("namespace")
         or header.get("function") != candidate_header.get("function")
     ):
@@ -340,7 +359,7 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
     )
 
     downstream = list(args.downstream_args)
-    shortlist = _read_shortlist(scores, manifest, cost_catalog)
+    shortlist = _read_shortlist(scores, manifest, cost_catalog, architecture)
     shortlist_root = output / "shortlist"
     shortlist_root.mkdir()
     materialized = []

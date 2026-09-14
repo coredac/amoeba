@@ -43,6 +43,18 @@ struct RankedCandidate {
 };
 
 using CostQueryKey = std::tuple<std::string, int64_t, int64_t>;
+
+// The task name is deliberately part of the catalogue key.  A task body SHA
+// is useful for sharing an expensive prediction, but it is not a substitute
+// for checking that every named task in the current IR has an explicit cost
+// entry.
+//
+// PredictionCacheKey is the reusable prediction identity: the task body
+// fingerprint binds the computation, the architecture fingerprint binds the
+// target machine, and the oriented mapper dimensions bind the spatial query.
+// A task's trip count is not included because the predictor returns the
+// per-iteration II/startup pair; the scorer applies each task's current trip
+// count afterward.
 using PredictionCacheKey =
     std::tuple<std::string, std::string, int64_t, int64_t>;
 
@@ -54,7 +66,15 @@ class TaskShapeCostCache {
 public:
   bool load(llvm::StringRef path, llvm::StringRef expectedFunction,
             llvm::ArrayRef<TaskFact> expectedTasks,
+            // This is the SHA-256 of the exact candidate JSONL bytes that the
+            // scorer will read.  It prevents a catalogue produced for another
+            // enumeration (even one with the same task names) from being
+            // reused accidentally.
             llvm::StringRef expectedCandidateManifestSha256,
+            // This is the SHA-256 of the exact architecture YAML selected by
+            // --architecture-spec.  Dimensions alone cannot identify a
+            // machine: same-sized architectures may differ in routing,
+            // functional units, memory, or latency data.
             llvm::StringRef expectedArchitectureSha256, std::string &error);
   const TaskShapeCost *get(const TaskShapeChoice &choice, std::string &error);
 
@@ -75,10 +95,17 @@ public:
 
 private:
   std::string namespace_;
+  // Identity of the candidate JSONL bound to this catalogue.  The score
+  // header copies it so the Python driver can verify the complete chain.
   std::string candidateManifestSha256_;
+  // Identity of the architecture YAML used by both enumeration and scoring.
   std::string architectureSha256_;
+  // Identity of the exact cost JSON bytes loaded here.  This is reported in
+  // the score header; it is not a hash of parsed/normalized JSON.
   std::string catalogSha256_;
   std::string mapperSuccessProbabilityRole_;
+  // Current-IR task name -> task-body SHA-256.  This map is populated only
+  // after the catalogue's task provenance has been checked against the IR.
   std::map<std::string, std::string> taskBodySha256_;
   std::map<CostQueryKey, TaskShapeCost> catalog_;
   std::map<PredictionCacheKey, TaskShapeCost> predictionCache_;

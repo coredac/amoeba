@@ -1,7 +1,7 @@
 // Two dependent tasks each take five predicted cycles. A compute-bottleneck
 // score would be five; the production spatial-temporal scheduler makespan is ten.
 // RUN: mlir-amoeba-opt %s \
-// RUN:   '--enumerate-analytical-task-candidates=output=%t.candidates.jsonl' \
+// RUN:   '--enumerate-analytical-task-candidates=output=%t.candidates.jsonl max-cgras-per-task=1' \
 // RUN:   --architecture-spec=%S/../../../archspec/architecture_4x4.yaml \
 // RUN:   -o /dev/null
 // RUN: python3 %S/fixed-makespan-catalog.py create \

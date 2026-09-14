@@ -92,8 +92,15 @@ struct ScoreAnalyticalTaskCandidatesPass
       func.emitError() << error;
       return signalPassFailure();
     }
+    // Bind scoring to the exact JSONL bytes that enumerate the candidate
+    // space.  This includes the manifest header, candidate ordering, and
+    // footer; a same-shaped space serialized differently is still a different
+    // input to the cost catalogue.
     FailureOr<std::string> candidateSha =
         sha256File(candidateFile.getValue(), error);
+    // Bind scoring to the exact architecture YAML selected for this pass.
+    // The manifest and catalogue use this identity to reject costs generated
+    // for a same-sized but otherwise different machine.
     FailureOr<std::string> architectureSha = currentArchitectureSha256(error);
     if (failed(candidateSha) || failed(architectureSha)) {
       func.emitError() << error;
@@ -122,6 +129,9 @@ struct ScoreAnalyticalTaskCandidatesPass
           scoreHeader["candidate_schema"] = kCandidateSchema.str();
           scoreHeader["function"] = func.getSymName().str();
           scoreHeader["cost_namespace"] = costs.nameSpace().str();
+          // The Python driver checks these hashes before replaying any
+          // materialized candidate.  They form a chain from the score output
+          // back to the exact manifest, cost JSON, and architecture inputs.
           scoreHeader["candidate_manifest_sha256"] =
               costs.candidateManifestSha256().str();
           scoreHeader["cost_catalog_sha256"] = costs.catalogSha256().str();
