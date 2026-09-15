@@ -70,6 +70,16 @@ enum class SchedulingMode {
   SpatialTemporal,
 };
 
+// Controls how a task's cgra_shape attribute is interpreted by the scheduler.
+enum class ShapeSelectionPolicy {
+  // Preserve the historical behavior: a supplied shape is tried in every
+  // legal rotation, and tasks without a shape use the enumerated candidates.
+  LegacyRotations,
+  // Use the supplied shape exactly as written. No rotations or fallback shape
+  // enumeration are allowed.
+  FixedOrientation,
+};
+
 // One scheduled CGRA cell assignment for a task.
 struct CgraPosition;
 
@@ -94,7 +104,9 @@ using TaskPriorityMap = llvm::DenseMap<Operation *, int>;
 class TaskScheduler {
 public:
   TaskScheduler(int grid_rows = kCgraGridRows, int grid_cols = kCgraGridCols,
-                SchedulingMode mode = SchedulingMode::SpatialTemporal);
+                SchedulingMode mode = SchedulingMode::SpatialTemporal,
+                ShapeSelectionPolicy shape_selection_policy =
+                    ShapeSelectionPolicy::LegacyRotations);
 
   // Schedules and places all Taskflow tasks in `func` using the caller-provided
   // task priority map.
@@ -149,6 +161,7 @@ private:
   int grid_rows_;
   int grid_cols_;
   SchedulingMode mode_;
+  ShapeSelectionPolicy shape_selection_policy_;
   int total_task_count_ = 0;
   int schedule_time_scale_ = 1;
   std::vector<std::vector<llvm::SmallVector<std::pair<int, int>, 4>>>

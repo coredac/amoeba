@@ -52,7 +52,8 @@ def OrchestrateTasksOnAccelerators
     Computes task resource allocation, placement, and scheduling for the
     Neura multi-CGRA architecture. Selects an orchestration strategy and
     invokes the shared scheduler. The routing-critical-path strategy is the
-    default and supports spatial and spatial-temporal scheduling.
+    default; analytical-dse-spatial consumes a materialized task candidate
+    and preserves each selected shape orientation.
   }];
   let options = [Option<
       "schedulingMode", "scheduling-mode", "std::string",
@@ -62,7 +63,8 @@ def OrchestrateTasksOnAccelerators
     Option<
       "orchestrationStrategy", "orchestration-strategy", "std::string",
       /*default=*/"\"routing-critical-path\"",
-      "Task orchestration strategy: 'routing-critical-path' (default).">];
+      "Task orchestration strategy: 'routing-critical-path' (default) or "
+      "'analytical-dse-spatial' (requires a materialized analytical task candidate).">];
   let constructor =
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
