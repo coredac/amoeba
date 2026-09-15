@@ -1,6 +1,6 @@
 //===- AnalyticalTaskCandidateCommon.h -----------------------*- C++ -*-===//
 //
-// Shared facts and file/JSON helpers for analytical task candidate spaces.
+// Shared task metadata and file/JSON helpers for analytical candidate spaces.
 // Candidate-space implementations provide their own shape and traversal
 // types, so a future temporal space can reuse these utilities independently.
 //
@@ -36,15 +36,15 @@ inline constexpr llvm::StringLiteral kSourceTaskBodyShaAttr =
 
 // Stores immutable identity and the compile-time trip count from one Taskflow
 // task. Tasks without a Taskflow counter represent one execution.
-struct TaskFact {
+struct TaskMetadata {
   taskflow::TaskflowTaskOp op;
   std::string name;
   std::string bodySha256;
   int64_t tripCount = 1;
 };
 
-FailureOr<llvm::SmallVector<TaskFact>>
-collectAnalyticalTaskFacts(func::FuncOp func, std::string &error);
+FailureOr<llvm::SmallVector<TaskMetadata>>
+collectAnalyticalTaskMetadata(func::FuncOp func, std::string &error);
 
 FailureOr<std::string> currentArchitectureSha256(std::string &error);
 

@@ -2,7 +2,7 @@
 //
 // Defines the fixed-orientation spatial shape alphabet and its exact
 // simultaneous packing traversal. A future temporal candidate space can live
-// beside this file while sharing task facts and output helpers.
+// beside this file while sharing task metadata and output helpers.
 //
 //===----------------------------------------------------------------------===//
 

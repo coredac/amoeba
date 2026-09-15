@@ -79,11 +79,10 @@ def EnumerateAnalyticalTaskCandidates
     placement feasibility is checked with backtracking; concrete placement
     coordinates remain a downstream heuristic choice. Constant counter chains
     record their exact trip count, while dynamic or unresolved bounds are
-    rejected. Counter bound information is read from the
-    `counter_dynamism` attributes produced by `classify-task-and-counter`,
-    which must run before this pass. The pass does not score candidates or
-    invoke the mapper. Fusion, fission, tiling, placement, and temporal order
-    are fixed.
+    rejected. Counter bounds are read directly from their SSA definitions, so
+    this pass does not depend on `classify-task-and-counter`. The pass does not
+    score candidates or invoke the mapper. Fusion, fission, tiling, placement,
+    and temporal order are fixed.
   }];
   let options =
       [Option<

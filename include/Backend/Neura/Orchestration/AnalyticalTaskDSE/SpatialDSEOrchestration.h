@@ -14,7 +14,6 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
-#include <optional>
 #include <string>
 
 namespace mlir {
@@ -40,11 +39,6 @@ public:
   static llvm::SmallVector<CgraShape>
   getRectangularShapes(int cgraCount, int gridRows = kCgraGridRows,
                        int gridCols = kCgraGridCols);
-
-  // Derives the execution count used by this strategy from constant Taskflow
-  // counter chains. A task without a counter represents one execution.
-  static FailureOr<std::optional<int64_t>>
-  inferStaticTaskTripCount(TaskflowTaskOp task, std::string &error);
 
   std::string getName() const override { return "analytical-dse-spatial"; }
 

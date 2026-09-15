@@ -81,12 +81,12 @@ struct EnumerateAnalyticalTaskCandidatesPass
       return signalPassFailure();
     }
 
-    // Collects task facts and builds the single-task shape alphabet from the
+    // Collects task metadata and builds the single-task shape alphabet from the
     // architecture values read by Neura's YAML loader. Dynamic or unresolved
     // trip counts are rejected by the static candidate-space contract.
-    FailureOr<SmallVector<TaskFact>> taskFacts =
-        collectAnalyticalTaskFacts(func, error);
-    if (failed(taskFacts)) {
+    FailureOr<SmallVector<TaskMetadata>> taskMetadata =
+        collectAnalyticalTaskMetadata(func, error);
+    if (failed(taskMetadata)) {
       func.emitError() << error;
       return signalPassFailure();
     }
@@ -113,7 +113,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
     }
     // TODO: Introduce an explicit, validated shape-pruning policy after the
     // complete rectangular space has a stable downstream contract.
-    SmallVector<SmallVector<RectShape>> shapesByTask(taskFacts->size(),
+    SmallVector<SmallVector<RectShape>> shapesByTask(taskMetadata->size(),
                                                      shapes);
     FailureOr<std::string> architectureSha = currentArchitectureSha256(error);
     if (failed(architectureSha)) {
@@ -129,7 +129,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
     uint64_t candidateCount = 0;
     bool exceededLimit = false;
     ConcurrentPackingCache packing(gridRows, gridCols);
-    SmallVector<SmallVector<uint8_t>> usedCostQueries(taskFacts->size());
+    SmallVector<SmallVector<uint8_t>> usedCostQueries(taskMetadata->size());
     for (auto [taskIndex, used] : llvm::enumerate(usedCostQueries))
       used.assign(shapesByTask[taskIndex].size(), 0);
     bool countedAll = visitConcurrentlyPackableShapeTuples(
@@ -182,7 +182,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
               int64_t{architecture.getPerCgraColumns()};
           architectureRecord["spec_sha256"] = *architectureSha;
           llvm::json::Array tasks;
-          for (const TaskFact &task : *taskFacts) {
+          for (const TaskMetadata &task : *taskMetadata) {
             llvm::json::Object record;
             record["task"] = task.name;
             record["body_sha256"] = task.bodySha256;
@@ -190,7 +190,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
             tasks.push_back(std::move(record));
           }
           llvm::json::Array costQueries;
-          for (auto [taskIndex, task] : llvm::enumerate(*taskFacts)) {
+          for (auto [taskIndex, task] : llvm::enumerate(*taskMetadata)) {
             for (auto [shapeIndex, shape] :
                  llvm::enumerate(shapesByTask[taskIndex])) {
               if (!usedCostQueries[taskIndex][shapeIndex])
@@ -238,7 +238,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
                 candidate.id = makeSequentialCandidateId(index);
                 for (auto [taskIndex, shapeIndex] :
                      llvm::enumerate(shapeIndices)) {
-                  const TaskFact &task = (*taskFacts)[taskIndex];
+                  const TaskMetadata &task = (*taskMetadata)[taskIndex];
                   candidate.choices.push_back(
                       {task.name, task.tripCount,
                        shapesByTask[taskIndex][shapeIndex]});
@@ -272,7 +272,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
     // IR that looks paired with a usable candidate file. The body-hash routine
     // deliberately ignores this attribute, so re-enumerating this output is
     // idempotent while any real task-body edit still invalidates the manifest.
-    for (const TaskFact &task : *taskFacts)
+    for (const TaskMetadata &task : *taskMetadata)
       task.op->setAttr(kSourceTaskBodyShaAttr,
                        StringAttr::get(func.getContext(), task.bodySha256));
     llvm::errs() << "[AnalyticalTaskDSE] enumerated all " << candidateCount

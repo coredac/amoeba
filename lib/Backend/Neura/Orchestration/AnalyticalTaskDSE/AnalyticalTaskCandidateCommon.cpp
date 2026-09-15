@@ -1,6 +1,6 @@
 //===- AnalyticalTaskCandidateCommon.cpp ---------------------*- C++ -*-===//
 //
-// Implements reusable task facts, architecture fingerprints, and output
+// Implements reusable task metadata, architecture fingerprints, and output
 // helpers shared by analytical candidate-space implementations.
 //
 //===----------------------------------------------------------------------===//
@@ -8,11 +8,12 @@
 #include "AnalyticalTaskCandidateCommon.h"
 
 #include "Backend/Neura/NeuraBackendOptions.h"
-#include "Backend/Neura/Orchestration/AnalyticalTaskDSE/SpatialDSEOrchestration.h"
-
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/SymbolTable.h"
 
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -21,7 +22,9 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SHA256.h"
 
+#include <algorithm>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <system_error>
@@ -33,6 +36,112 @@ namespace mlir {
 namespace amoeba {
 namespace neura {
 namespace analytical_dse {
+
+// Infers the execution count recorded in analytical candidate manifests from
+// constant Taskflow counter chains. Spatial and temporal candidate spaces use
+// the same task metadata, so counter interpretation belongs to this shared
+// candidate layer rather than either concrete orchestration strategy.
+static FailureOr<std::optional<int64_t>>
+inferStaticTaskTripCount(TaskflowTaskOp task, std::string &error) {
+  SmallVector<TaskflowCounterOp> counters;
+  task.walk([&](TaskflowCounterOp counter) { counters.push_back(counter); });
+  if (counters.empty())
+    return std::optional<int64_t>{};
+
+  if (!task.getBody().hasOneBlock()) {
+    error = "task " + task.getTaskName().str() +
+            " must contain exactly one block to infer a static trip count";
+    return failure();
+  }
+
+  SmallVector<TaskflowCounterOp> roots;
+  llvm::DenseMap<Value, SmallVector<TaskflowCounterOp>> children;
+  for (TaskflowCounterOp counter : counters) {
+    if (Value parent = counter.getParentIndex())
+      children[parent].push_back(counter);
+    else
+      roots.push_back(counter);
+  }
+  if (roots.empty()) {
+    error = "task " + task.getTaskName().str() +
+            " has counters but no root counter";
+    return failure();
+  }
+
+  auto constantIndex = [](Value value) -> FailureOr<int64_t> {
+    if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>())
+      return constant.value();
+    return failure();
+  };
+  auto counterTripCount = [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
+    FailureOr<int64_t> lower = constantIndex(counter.getLowerBound());
+    FailureOr<int64_t> upper = constantIndex(counter.getUpperBound());
+    FailureOr<int64_t> step = constantIndex(counter.getStep());
+    if (failed(lower) || failed(upper) || failed(step))
+      return failure();
+    if (*step <= 0 || *upper <= *lower ||
+        (*lower < 0 && *upper > std::numeric_limits<int64_t>::max() + *lower))
+      return failure();
+
+    int64_t distance = *upper - *lower;
+    return 1 + (distance - 1) / *step;
+  };
+
+  llvm::DenseSet<Operation *> active;
+  llvm::DenseSet<Operation *> visited;
+  std::function<FailureOr<int64_t>(TaskflowCounterOp)> chainTripCount =
+      [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
+    Operation *operation = counter.getOperation();
+    if (!active.insert(operation).second || visited.contains(operation)) {
+      error = "task " + task.getTaskName().str() +
+              " has a cyclic or multiply referenced counter chain";
+      return failure();
+    }
+
+    FailureOr<int64_t> count = counterTripCount(counter);
+    if (failed(count)) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    int64_t longestChildChain = 1;
+    auto found = children.find(counter.getCounterIndex());
+    if (found != children.end()) {
+      for (TaskflowCounterOp child : found->second) {
+        FailureOr<int64_t> childCount = chainTripCount(child);
+        if (failed(childCount))
+          return failure();
+        longestChildChain = std::max(longestChildChain, *childCount);
+      }
+    }
+    if (*count > std::numeric_limits<int64_t>::max() / longestChildChain) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    active.erase(operation);
+    visited.insert(operation);
+    return *count * longestChildChain;
+  };
+
+  int64_t total = 1;
+  for (TaskflowCounterOp root : roots) {
+    FailureOr<int64_t> rootCount = chainTripCount(root);
+    if (failed(rootCount))
+      return failure();
+    total = std::max(total, *rootCount);
+  }
+  if (visited.size() != counters.size()) {
+    error = "task " + task.getTaskName().str() +
+            " has a counter disconnected from every root";
+    return failure();
+  }
+  return std::optional<int64_t>{total};
+}
 
 // Returns a lowercase SHA-256. File hashes use raw bytes so any input change
 // invalidates a manifest produced from those bytes.
@@ -56,8 +165,8 @@ FailureOr<std::string> currentArchitectureSha256(std::string &error) {
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
       llvm::MemoryBuffer::getFile(path);
   if (!buffer) {
-    error = "cannot hash architecture specification " + path.str() +
-            ": " + buffer.getError().message();
+    error = "cannot hash architecture specification " + path.str() + ": " +
+            buffer.getError().message();
     return failure();
   }
   return sha256((*buffer)->getBuffer());
@@ -79,7 +188,7 @@ static FailureOr<int64_t> resolveAnalyticalTripCount(TaskflowTaskOp task,
   }
 
   FailureOr<std::optional<int64_t>> inferred =
-      SpatialDSEOrchestration::inferStaticTaskTripCount(task, error);
+      inferStaticTaskTripCount(task, error);
   if (failed(inferred)) {
     error += "; add an explicit positive trip_count or resolve the counter "
              "bounds first";
@@ -119,9 +228,9 @@ static std::string taskBodySha256(TaskflowTaskOp task) {
 // walk order.
 // The order is the task axis used by a spatial shape tuple, so duplicate names
 // are rejected before they can make candidate records ambiguous.
-FailureOr<SmallVector<TaskFact>>
-collectAnalyticalTaskFacts(func::FuncOp func, std::string &error) {
-  SmallVector<TaskFact> tasks;
+FailureOr<SmallVector<TaskMetadata>>
+collectAnalyticalTaskMetadata(func::FuncOp func, std::string &error) {
+  SmallVector<TaskMetadata> tasks;
   llvm::StringSet<> names;
   WalkResult walkResult = func.walk([&](TaskflowTaskOp task) {
     std::string name = task.getTaskName().str();
