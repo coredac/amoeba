@@ -25,6 +25,7 @@ std::unique_ptr<Pass> createConstructHyperblockFromTaskPass();
 std::unique_ptr<Pass> createClassifyTaskAndCounterPass();
 std::unique_ptr<Pass> createOrchestrateTasksOnAcceleratorsPass();
 std::unique_ptr<Pass> createAnalyzeRecResMiiPass();
+std::unique_ptr<Pass> createAnalyzeTaskPipelineIntervalPass();
 std::unique_ptr<Pass> createEnumerateAnalyticalTaskCandidatesPass();
 std::unique_ptr<Pass> createScoreAnalyticalTaskCandidatesPass();
 std::unique_ptr<Pass> createMaterializeAnalyticalTaskCandidatePass();

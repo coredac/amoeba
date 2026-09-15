@@ -3,10 +3,12 @@
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
@@ -228,6 +230,15 @@ struct TaskNode {
     }
     return 1;
   }
+
+  // Number of data-parallel copies of this task.  Replicas are an explicit
+  // placement request; absent or non-positive values retain the legacy
+  // single-placement behavior.
+  int getReplicas() const {
+    if (auto attr = op->getAttrOfType<IntegerAttr>("replicas"))
+      return std::max(1, static_cast<int>(attr.getInt()));
+    return 1;
+  }
 };
 
 // Represents a MemRef node in the dependency graph.
@@ -339,9 +350,11 @@ private:
 // computeEarliestStartTime() so that each ready task starts as soon as all
 // explicit taskflow dependencies have completed.
 TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode,
-                             ShapeSelectionPolicy shape_selection_policy)
+                             ShapeSelectionPolicy shape_selection_policy,
+                             bool comm_aware)
     : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode),
-      shape_selection_policy_(shape_selection_policy) {
+      shape_selection_policy_(shape_selection_policy),
+      comm_aware_(comm_aware) {
   cgra_occupancy_.resize(grid_rows_);
   for (auto &row : cgra_occupancy_) {
     row.resize(grid_cols_);
@@ -451,7 +464,8 @@ bool TaskScheduler::schedule(func::FuncOp func,
         cgra_count = attr.getInt();
       }
 
-      TaskPlacement placement = findBestPlacement(task_node, cgra_count, graph);
+      TaskPlacement placement = findBestPlacement(task_node, cgra_count, graph,
+                                                  task_node->getReplicas());
 
       if (placement.cgra_positions.empty()) {
         return false;
@@ -524,6 +538,54 @@ bool TaskScheduler::schedule(func::FuncOp func,
     }
     schedule_makespan_ =
         std::max(schedule_makespan_, start * schedule_time_scale_ + duration);
+  }
+
+  // Keep the replica-set test observable without changing the normal
+  // scheduler's diagnostics.  A replica request is complete only when all
+  // copies occupy the grid at the same instant.
+  bool has_replica_set = false;
+  for (const auto &task_node : graph.task_nodes)
+    has_replica_set |= task_node->getReplicas() > 1;
+  if (has_replica_set) {
+    int64_t makespan = 0;
+    int64_t busy_area = 0;
+    llvm::errs() << "\n=== Orchestrated Replica Sets ("
+                 << (mode_ == SchedulingMode::Spatial ? "spatial"
+                                                      : "spatial-temporal")
+                 << ", " << grid_rows_ << "x" << grid_cols_ << " CGRAs) ===\n";
+    for (const auto &task_node : graph.task_nodes) {
+      if (task_node->placement.empty())
+        continue;
+      int start = std::numeric_limits<int>::max();
+      int finish = 0;
+      for (const CgraPosition &pos : task_node->placement) {
+        start = std::min(start, pos.start_time);
+        finish = std::max(finish, pos.start_time + pos.duration);
+      }
+      makespan = std::max<int64_t>(makespan, finish);
+      busy_area +=
+          static_cast<int64_t>(finish - start) * task_node->placement.size();
+
+      int cgra_count = 1;
+      if (auto attr = task_node->op->getAttrOfType<IntegerAttr>("cgra_count"))
+        cgra_count = std::max(1, static_cast<int>(attr.getInt()));
+      int placed_replicas =
+          static_cast<int>(task_node->placement.size()) / cgra_count;
+      llvm::errs() << "  " << task_node->op.getTaskName() << ": start=" << start
+                   << " finish=" << finish
+                   << " cgras=" << task_node->placement.size()
+                   << " replicas=" << placed_replicas << "/"
+                   << task_node->getReplicas() << "\n";
+    }
+    int64_t grid_area = static_cast<int64_t>(grid_rows_) * grid_cols_;
+    double utilisation = (makespan > 0 && grid_area > 0)
+                             ? static_cast<double>(busy_area) /
+                                   (static_cast<double>(makespan) * grid_area)
+                             : 0.0;
+    llvm::errs() << "[Orchestrate] makespan=" << makespan
+                 << " tasks=" << graph.task_nodes.size()
+                 << " grid_utilisation=" << llvm::formatv("{0:F3}", utilisation)
+                 << "\n";
   }
 
   // Write output attributes.
@@ -737,6 +799,39 @@ bool TaskScheduler::assignAllSrams(TaskMemoryGraph &graph) {
   return changed;
 }
 
+// Enumerates compact rectangles containing several copies of a rectangular
+// task shape.  Each factorisation of `replicas` is a possible arrangement of
+// copies; the shape list is sorted by squareness so compact sets are tried
+// before long strips.
+SmallVector<CgraShape> TaskScheduler::replicaSetShapes(const CgraShape &base,
+                                                       int replicas) {
+  SmallVector<CgraShape> composites;
+  if (!base.is_rectangular || replicas <= 1)
+    return composites;
+
+  llvm::DenseSet<int64_t> seen_keys;
+  for (int down = 1; down <= replicas; ++down) {
+    if (replicas % down != 0)
+      continue;
+    int rows = base.rows * down;
+    int cols = base.cols * (replicas / down);
+    if (rows > grid_rows_ || cols > grid_cols_)
+      continue;
+    int64_t key = (static_cast<int64_t>(rows) << 16) | cols;
+    if (seen_keys.insert(key).second)
+      composites.push_back({rows, cols, /*is_rectangular=*/true, {}});
+  }
+
+  llvm::sort(composites, [](const CgraShape &lhs, const CgraShape &rhs) {
+    int lhs_squareness = std::abs(lhs.rows - lhs.cols);
+    int rhs_squareness = std::abs(rhs.rows - rhs.cols);
+    if (lhs_squareness != rhs_squareness)
+      return lhs_squareness < rhs_squareness;
+    return lhs.area() < rhs.area();
+  });
+  return composites;
+}
+
 // Finds the best placement for `task_node` on the 2D multi-CGRA grid.
 //
 // In SpatialTemporal mode an outer time loop applies ASAP scheduling:
@@ -744,7 +839,9 @@ bool TaskScheduler::assignAllSrams(TaskMemoryGraph &graph) {
 // then incremented by task_duration until a valid grid position is found.
 TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
                                                int cgra_count,
-                                               TaskMemoryGraph &graph) {
+                                               TaskMemoryGraph &graph,
+                                               int replicas) {
+  replicas = std::max(1, replicas);
   SmallVector<CgraShape> shapes_to_try;
   auto shape_attr = task_node->op->getAttrOfType<StringAttr>("cgra_shape");
   if (shape_selection_policy_ == ShapeSelectionPolicy::FixedOrientation) {
@@ -758,13 +855,123 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
     StringRef cgra_shape_str = shape_attr.getValue();
     if (!cgra_shape_str.empty()) {
       CgraShape base = parseCgraShapeToBase(cgra_shape_str, cgra_count);
-      shapes_to_try = rotationsOf(base);
+      if (task_node->op->hasAttr("amoeba.analytical_shape_orientation_fixed"))
+        shapes_to_try.push_back(base);
+      else
+        shapes_to_try = rotationsOf(base);
     }
   }
   if (shapes_to_try.empty()) {
     if (shape_selection_policy_ == ShapeSelectionPolicy::FixedOrientation)
       return TaskPlacement{};
     shapes_to_try = getAllPlacementShapes(cgra_count);
+  }
+
+  if (replicas > 1) {
+    SmallVector<CgraShape> set_shapes;
+    llvm::DenseSet<int64_t> seen_set_shapes;
+    for (const CgraShape &base : shapes_to_try) {
+      for (const CgraShape &composite : replicaSetShapes(base, replicas)) {
+        int64_t key =
+            (static_cast<int64_t>(composite.rows) << 16) | composite.cols;
+        if (seen_set_shapes.insert(key).second)
+          set_shapes.push_back(composite);
+      }
+    }
+
+    const int task_duration = getScheduleDuration(task_node);
+    int64_t t_start = (mode_ == SchedulingMode::SpatialTemporal)
+                          ? computeEarliestStartTime(task_node)
+                          : 0;
+    int grid_area = grid_rows_ * grid_cols_;
+    int max_time_slots = std::max(grid_area, total_task_count_);
+    int64_t t_max =
+        (mode_ == SchedulingMode::SpatialTemporal)
+            ? t_start + static_cast<int64_t>(max_time_slots) * task_duration
+            : 0;
+
+    // Finds the best placement for one item at one instant.  `reserved`
+    // contains copies already selected for this same replica set and is kept
+    // separate from the global occupancy until the complete set is known.
+    auto bestItemAt = [&](llvm::ArrayRef<CgraShape> candidate_shapes,
+                          int64_t start_time,
+                          llvm::ArrayRef<CgraPosition> reserved) {
+      TaskPlacement best;
+      int best_score = INT_MIN;
+      if (start_time > std::numeric_limits<int>::max() - task_duration)
+        return best;
+      int start_time_int = static_cast<int>(start_time);
+
+      for (const CgraShape &shape : candidate_shapes) {
+        SmallVector<std::pair<int, int>> shape_offsets;
+        if (shape.is_rectangular) {
+          for (int r = 0; r < shape.rows; ++r)
+            for (int c = 0; c < shape.cols; ++c)
+              shape_offsets.push_back({c, r});
+        } else {
+          shape_offsets = SmallVector<std::pair<int, int>>(
+              shape.cgra_positions.begin(), shape.cgra_positions.end());
+        }
+
+        for (int origin_row = 0; origin_row < grid_rows_; ++origin_row) {
+          for (int origin_col = 0; origin_col < grid_cols_; ++origin_col) {
+            bool valid = true;
+            TaskPlacement candidate;
+            for (auto &[col_off, row_off] : shape_offsets) {
+              int abs_row = origin_row + row_off;
+              int abs_col = origin_col + col_off;
+              CgraPosition position{abs_row, abs_col, start_time_int,
+                                    task_duration, 0};
+              if (abs_row < 0 || abs_row >= grid_rows_ || abs_col < 0 ||
+                  abs_col >= grid_cols_ ||
+                  isOccupied(abs_row, abs_col, start_time_int, task_duration) ||
+                  llvm::is_contained(reserved, position)) {
+                valid = false;
+                break;
+              }
+              candidate.cgra_positions.push_back(position);
+            }
+            if (!valid)
+              continue;
+            int score = computeScore(task_node, candidate, graph);
+            if (score > best_score) {
+              best_score = score;
+              best = candidate;
+            }
+          }
+        }
+      }
+      return best;
+    };
+
+    // A replica set is placed atomically.  Prefer a single compact rectangle;
+    // if the grid cannot hold one, search for all copies as disjoint arrays at
+    // the same instant.  A partial result is never committed.
+    for (int64_t t = t_start; t <= t_max; t += task_duration) {
+      TaskPlacement compact = bestItemAt(set_shapes, t, {});
+      if (!compact.cgra_positions.empty())
+        return compact;
+
+      TaskPlacement scattered;
+      bool complete = true;
+      for (int replica = 0; replica < replicas; ++replica) {
+        TaskPlacement one =
+            bestItemAt(shapes_to_try, t, scattered.cgra_positions);
+        if (one.cgra_positions.empty()) {
+          complete = false;
+          break;
+        }
+        scattered.cgra_positions.append(one.cgra_positions.begin(),
+                                        one.cgra_positions.end());
+      }
+      if (complete)
+        return scattered;
+      if (mode_ == SchedulingMode::Spatial)
+        break;
+      if (t > std::numeric_limits<int>::max() - task_duration)
+        break;
+    }
+    return TaskPlacement{};
   }
 
   int task_duration = getScheduleDuration(task_node);
@@ -950,15 +1157,23 @@ SmallVector<CgraShape> TaskScheduler::rotationsOf(const CgraShape &base) {
 //                   task in a different context.
 //
 // Higher score is better; 0 means all neighbours are co-located.
-int TaskScheduler::computeScore(TaskNode *task_node,
-                                const TaskPlacement &placement,
-                                TaskMemoryGraph &graph) {
+int64_t TaskScheduler::computeScore(TaskNode *task_node,
+                                    const TaskPlacement &placement,
+                                    TaskMemoryGraph &graph) {
   // Weight constants (tunable).
   constexpr int kAlpha = 10;   // SSA proximity weight.
   constexpr int kBeta = 50;    // Memory proximity weight (high priority).
   constexpr int kGamma = 1000; // Context switch cost is higher than NoC.
 
-  int ssa_score = 0, mem_score = 0, context_reuse_penalty = 0;
+  auto memrefElementCount = [](MemoryNode *mem) -> int64_t {
+    if (auto shaped_type = llvm::dyn_cast<ShapedType>(mem->memref.getType())) {
+      if (shaped_type.hasStaticShape())
+        return std::max<int64_t>(1, shaped_type.getNumElements());
+    }
+    return 1;
+  };
+
+  int64_t ssa_score = 0, mem_score = 0, context_reuse_penalty = 0;
 
   auto minDistToPlacement = [&](const SmallVector<CgraPosition> &other) -> int {
     int min_dist = INT_MAX;
@@ -992,17 +1207,21 @@ int TaskScheduler::computeScore(TaskNode *task_node,
   }
 
   // 2. Memory proximity — penalise distance to assigned SRAMs.
-  // For read memrefs (data sources).
+  // A communication-aware schedule weights each memory-proximity penalty by
+  // the static number of elements transferred by that memref. Dynamic or
+  // unshaped values retain the legacy unit weight.
   for (MemoryNode *mem : task_node->read_memrefs) {
     if (mem->assigned_sram_pos) {
-      mem_score -= minDistToTarget(*mem->assigned_sram_pos);
+      int64_t transfer_volume = comm_aware_ ? memrefElementCount(mem) : 1;
+      mem_score -= transfer_volume * minDistToTarget(*mem->assigned_sram_pos);
     }
   }
   // For write memrefs: if the SRAM is already assigned (e.g. read by a
   // previous task), we want to be close to it too.
   for (MemoryNode *mem : task_node->write_memrefs) {
     if (mem->assigned_sram_pos) {
-      mem_score -= minDistToTarget(*mem->assigned_sram_pos);
+      int64_t transfer_volume = comm_aware_ ? memrefElementCount(mem) : 1;
+      mem_score -= transfer_volume * minDistToTarget(*mem->assigned_sram_pos);
     }
   }
 
