@@ -23,7 +23,7 @@ def create(manifest_path, catalog_path):
     # scorer can reject a catalogue for another same-sized machine.
     architecture_sha = header["architecture"]["spec_sha256"]
     # Task body hashes identify the current task IR after DSE-only attributes
-    # are removed.  Trip counts remain separate task facts and are not folded
+    # are removed.  Trip counts remain separate task metadata and are not folded
     # into this body identity.
     task_hashes = {
         task["task"]: task["body_sha256"] for task in header["tasks"]

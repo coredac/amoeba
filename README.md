@@ -217,7 +217,8 @@ hash of the exact architecture YAML bytes; grid dimensions alone do not
 identify routing, functional-unit, memory, or latency capabilities. Each
 `task_body_sha256` binds predictor costs to the current task IR after
 DSE-generated attributes are removed; the task's trip count is kept as a
-separate fact because it changes duration rather than the task computation.
+separate metadata field because it changes duration rather than the task
+computation.
 `task_dfg_sha256` identifies the extracted DFG report used by the predictor.
 The Python adapter binds that report, the Neura executable, model/checkpoint
 weights, and their configuration files to their hashes; the C++ scorer validates

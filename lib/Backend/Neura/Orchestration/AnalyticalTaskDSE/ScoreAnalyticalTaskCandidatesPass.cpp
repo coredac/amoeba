@@ -86,9 +86,9 @@ struct ScoreAnalyticalTaskCandidatesPass
       return signalPassFailure();
     }
 
-    FailureOr<SmallVector<TaskFact>> taskFacts =
-        collectAnalyticalTaskFacts(func, error);
-    if (failed(taskFacts)) {
+    FailureOr<SmallVector<TaskMetadata>> taskMetadata =
+        collectAnalyticalTaskMetadata(func, error);
+    if (failed(taskMetadata)) {
       func.emitError() << error;
       return signalPassFailure();
     }
@@ -107,7 +107,7 @@ struct ScoreAnalyticalTaskCandidatesPass
       return signalPassFailure();
     }
     TaskShapeCostCache costs;
-    if (!costs.load(costFile.getValue(), func.getSymName(), *taskFacts,
+    if (!costs.load(costFile.getValue(), func.getSymName(), *taskMetadata,
                     *candidateSha, *architectureSha, error)) {
       func.emitError() << error;
       return signalPassFailure();
@@ -269,7 +269,7 @@ struct ScoreAnalyticalTaskCandidatesPass
             return true;
           };
 
-          if (!readCandidateManifest(candidateFile.getValue(), *taskFacts,
+          if (!readCandidateManifest(candidateFile.getValue(), *taskMetadata,
                                      func.getSymName(),
                                      ::mlir::neura::getArchitecture(), consume,
                                      manifestHeader, manifestFooter, error))

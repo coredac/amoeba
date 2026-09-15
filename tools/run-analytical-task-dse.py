@@ -145,17 +145,17 @@ def _require_bound_trip_counts(path: Path) -> None:
     header, _ = _candidate_header_and_count(path)
     tasks = header.get("tasks")
     if not isinstance(tasks, list) or not tasks:
-        raise PipelineError("candidate manifest has no task facts")
+        raise PipelineError("candidate manifest has no task metadata")
     unbound = []
     for task in tasks:
         if not isinstance(task, dict):
-            raise PipelineError("candidate manifest task fact is invalid")
+            raise PipelineError("candidate manifest task metadata is invalid")
         if task.get("trip_count_kind") == "symbol_dynamic":
             unbound.append(str(task.get("task", "<unnamed>")))
         elif isinstance(task.get("trip_count"), bool) or not isinstance(
             task.get("trip_count"), int
         ) or int(task["trip_count"]) <= 0:
-            raise PipelineError("candidate manifest trip-count fact is invalid")
+            raise PipelineError("candidate manifest trip count is invalid")
     if unbound:
         raise PipelineError(
             "program-level analytical ranking requires concrete trip counts; "

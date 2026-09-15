@@ -128,7 +128,7 @@ static bool sameCost(const TaskShapeCost &lhs, const TaskShapeCost &rhs) {
 // because their paths are not part of this pass's inputs; the Python predictor
 // adapter is responsible for hashing and binding those producer artifacts.
 bool TaskShapeCostCache::load(StringRef path, StringRef expectedFunction,
-                              ArrayRef<TaskFact> expectedTasks,
+                              ArrayRef<TaskMetadata> expectedTasks,
                               StringRef expectedCandidateManifestSha256,
                               StringRef expectedArchitectureSha256,
                               std::string &error) {
@@ -303,11 +303,11 @@ bool TaskShapeCostCache::load(StringRef path, StringRef expectedFunction,
     return false;
   }
   taskBodySha256_.clear();
-  for (const TaskFact &task : expectedTasks) {
+  for (const TaskMetadata &task : expectedTasks) {
     std::optional<StringRef> bodySha = taskBodyHashes->getString(task.name);
     std::optional<StringRef> dfgSha = taskHashes->getString(task.name);
     // bodySha is compared with the body hash freshly derived from current IR;
-    // trip_count is intentionally separate and is checked as a task fact.
+    // trip_count is intentionally separate and is checked as task metadata.
     // dfgSha is only required to be a valid declared identity here, as noted
     // above, because this pass cannot locate the adapter's DFG file.
     if (!bodySha || !dfgSha || *bodySha != task.bodySha256) {

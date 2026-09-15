@@ -65,7 +65,7 @@ using PredictionCacheKey =
 class TaskShapeCostCache {
 public:
   bool load(llvm::StringRef path, llvm::StringRef expectedFunction,
-            llvm::ArrayRef<TaskFact> expectedTasks,
+            llvm::ArrayRef<TaskMetadata> expectedTasks,
             // This is the SHA-256 of the exact candidate JSONL bytes that the
             // scorer will read.  It prevents a catalogue produced for another
             // enumeration (even one with the same task names) from being
