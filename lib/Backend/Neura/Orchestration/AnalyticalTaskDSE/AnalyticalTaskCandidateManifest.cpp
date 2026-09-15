@@ -54,8 +54,8 @@ static std::optional<int64_t> requiredInteger(const llvm::json::Object &object,
 }
 
 // Reads the concrete trip count required by the static-shape manifest.
-static bool parseTripCountFact(const llvm::json::Object &object,
-                               int64_t &tripCount, std::string &error) {
+static bool parseTripCount(const llvm::json::Object &object, int64_t &tripCount,
+                           std::string &error) {
   if (object.get("trip_count_kind")) {
     error = "symbol-dynamic trip counts are unsupported by static shapes";
     return false;
@@ -138,7 +138,7 @@ static bool parseHeader(const llvm::json::Object &object,
 // before a task-body edit cannot be applied to the changed task. Trip count is
 // deliberately excluded from that canonical body hash and checked separately.
 static bool validateHeaderTasks(const llvm::json::Object &object,
-                                ArrayRef<TaskFact> tasks,
+                                ArrayRef<TaskMetadata> tasks,
                                 std::string &error) {
   const llvm::json::Array *records = object.getArray("tasks");
   if (!records || records->size() != tasks.size()) {
@@ -154,13 +154,13 @@ static bool validateHeaderTasks(const llvm::json::Object &object,
     auto name = requiredString(*record, "task", error);
     auto bodySha = requiredString(*record, "body_sha256", error);
     int64_t tripCount = 0;
-    if (!name || !bodySha || !parseTripCountFact(*record, tripCount, error)) {
+    if (!name || !bodySha || !parseTripCount(*record, tripCount, error)) {
       return false;
     }
     if (!isSha256(*bodySha) || *name != tasks[index].name ||
         *bodySha != tasks[index].bodySha256 ||
         tripCount != tasks[index].tripCount) {
-      error = "candidate manifest header task facts do not match current IR";
+      error = "candidate manifest header task metadata do not match current IR";
       return false;
     }
   }
@@ -204,11 +204,11 @@ static bool sameShape(const RectShape &lhs, const RectShape &rhs) {
          std::tie(rhs.rows, rhs.cols, rhs.mapperRows, rhs.mapperCols);
 }
 
-// Parses one candidate record and verifies task names and trip-count facts.
+// Parses one candidate record and verifies task names and trip-count metadata.
 // Candidate ordering and the sequential ID are checked by the stream reader,
 // which knows the record's canonical mixed-radix index.
 static bool parseCandidate(const llvm::json::Object &object,
-                           ArrayRef<TaskFact> tasks, Candidate &candidate,
+                           ArrayRef<TaskMetadata> tasks, Candidate &candidate,
                            std::string &error) {
   auto schema = requiredString(object, "schema", error);
   auto id = requiredString(object, "candidate_id", error);
@@ -233,12 +233,12 @@ static bool parseCandidate(const llvm::json::Object &object,
     int64_t tripCount = 0;
     const llvm::json::Object *shapeObject = record->getObject("shape");
     if (!taskName || !shapeObject ||
-        !parseTripCountFact(*record, tripCount, error)) {
+        !parseTripCount(*record, tripCount, error)) {
       return false;
     }
-    const TaskFact &task = tasks[index];
+    const TaskMetadata &task = tasks[index];
     if (*taskName != task.name || tripCount != task.tripCount) {
-      error = "candidate task facts do not match the current IR";
+      error = "candidate task metadata do not match the current IR";
       return false;
     }
     RectShape shape;
@@ -255,7 +255,7 @@ static bool parseCandidate(const llvm::json::Object &object,
 // lexicographic order produced by visitConcurrentlyPackableShapeTuples; this
 // rejects duplicates and reordering without storing the entire manifest.
 static bool validateCandidateAtIndex(
-    uint64_t index, ArrayRef<TaskFact> tasks,
+    uint64_t index, ArrayRef<TaskMetadata> tasks,
     ArrayRef<SmallVector<RectShape>> shapesByTask,
     ConcurrentPackingCache &packing, const Candidate &candidate,
     SmallVectorImpl<size_t> &previousShapeIndices, std::string &error) {
@@ -350,7 +350,7 @@ static bool architectureMatches(const ManifestHeader &header,
 // candidate to the consumer. Every record must be a legal, concurrently
 // packable shape tuple in canonical order. The footer is checked against an
 // independent traversal of the exact packable space.
-bool readCandidateManifest(StringRef path, ArrayRef<TaskFact> tasks,
+bool readCandidateManifest(StringRef path, ArrayRef<TaskMetadata> tasks,
                            StringRef expectedFunction,
                            const ::mlir::neura::Architecture &architecture,
                            CandidateConsumer consume, ManifestHeader &header,

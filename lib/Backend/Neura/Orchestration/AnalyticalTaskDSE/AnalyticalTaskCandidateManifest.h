@@ -53,7 +53,8 @@ using CandidateConsumer =
 // A successful parse guarantees header/candidate/footer ordering, current IR
 // and architecture identity, canonical candidate order, exact concurrent
 // packing, and completeness of the finite candidate space.
-bool readCandidateManifest(llvm::StringRef path, llvm::ArrayRef<TaskFact> tasks,
+bool readCandidateManifest(llvm::StringRef path,
+                           llvm::ArrayRef<TaskMetadata> tasks,
                            llvm::StringRef expectedFunction,
                            const ::mlir::neura::Architecture &architecture,
                            CandidateConsumer consume, ManifestHeader &header,

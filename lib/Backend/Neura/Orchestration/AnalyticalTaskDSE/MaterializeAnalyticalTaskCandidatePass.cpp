@@ -68,9 +68,9 @@ struct MaterializeAnalyticalTaskCandidatePass
       return signalPassFailure();
     }
 
-    FailureOr<SmallVector<TaskFact>> taskFacts =
-        collectAnalyticalTaskFacts(func, error);
-    if (failed(taskFacts)) {
+    FailureOr<SmallVector<TaskMetadata>> taskMetadata =
+        collectAnalyticalTaskMetadata(func, error);
+    if (failed(taskMetadata)) {
       func.emitError() << error;
       return signalPassFailure();
     }
@@ -91,7 +91,7 @@ struct MaterializeAnalyticalTaskCandidatePass
       return true;
     };
     if (!readCandidateManifest(
-            candidateFile.getValue(), *taskFacts, func.getSymName(),
+            candidateFile.getValue(), *taskMetadata, func.getSymName(),
             ::mlir::neura::getArchitecture(), consume, header, footer, error)) {
       if (error.empty()) {
         error = "candidate selection is ambiguous";
@@ -109,7 +109,7 @@ struct MaterializeAnalyticalTaskCandidatePass
     // all been validated. These attributes configure the unchanged downstream
     // heuristic mapper; this pass fabricates no placement or II.
     OpBuilder builder(func.getContext());
-    for (auto [task, choice] : llvm::zip(*taskFacts, selected->choices)) {
+    for (auto [task, choice] : llvm::zip(*taskMetadata, selected->choices)) {
       task.op->setAttr("cgra_count",
                        builder.getI32IntegerAttr(
                            static_cast<int32_t>(choice.shape.cgraCount())));
