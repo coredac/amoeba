@@ -1,9 +1,10 @@
 add_mlir_library(MLIRAmoebaNeuraAnalyticalTaskDSE
-    SpatialShapeUtils.cpp
+    SpatialDSEOrchestration.cpp
 
     PARTIAL_SOURCES_INTENDED
 
     LINK_LIBS PUBLIC
+    MLIRAmoebaNeuraOrchestrationUtil
     MLIRArithDialect
     MLIRFuncDialect
     MLIRIR

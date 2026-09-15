@@ -29,4 +29,5 @@ add_mlir_library(MLIRAmoebaNeuraOrchestration
     LINK_LIBS PUBLIC
     MLIRAmoebaNeuraOrchestrationUtil
     MLIRAmoebaNeuraRoutingCriticalPathOrchestration
+    MLIRAmoebaNeuraAnalyticalTaskDSE
 )

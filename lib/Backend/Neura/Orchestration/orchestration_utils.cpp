@@ -333,8 +333,10 @@ private:
 // In SpatialTemporal mode, ASAP scheduling is applied via
 // computeEarliestStartTime() so that each ready task starts as soon as all
 // explicit taskflow dependencies have completed.
-TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode)
-    : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {
+TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode,
+                             ShapeSelectionPolicy shape_selection_policy)
+    : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode),
+      shape_selection_policy_(shape_selection_policy) {
   cgra_occupancy_.resize(grid_rows_);
   for (auto &row : cgra_occupancy_) {
     row.resize(grid_cols_);
@@ -720,14 +722,24 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
                                                int cgra_count,
                                                TaskMemoryGraph &graph) {
   SmallVector<CgraShape> shapes_to_try;
-  if (auto attr = task_node->op->getAttrOfType<StringAttr>("cgra_shape")) {
-    StringRef cgra_shape_str = attr.getValue();
+  auto shape_attr = task_node->op->getAttrOfType<StringAttr>("cgra_shape");
+  if (shape_selection_policy_ == ShapeSelectionPolicy::FixedOrientation) {
+    // A fixed-shape schedule is driven entirely by the materialized candidate.
+    // Do not rotate its shape or enumerate a fallback when it is absent.
+    if (!shape_attr || shape_attr.getValue().empty())
+      return TaskPlacement{};
+    shapes_to_try.push_back(
+        parseCgraShapeToBase(shape_attr.getValue(), cgra_count));
+  } else if (shape_attr) {
+    StringRef cgra_shape_str = shape_attr.getValue();
     if (!cgra_shape_str.empty()) {
       CgraShape base = parseCgraShapeToBase(cgra_shape_str, cgra_count);
       shapes_to_try = rotationsOf(base);
     }
   }
   if (shapes_to_try.empty()) {
+    if (shape_selection_policy_ == ShapeSelectionPolicy::FixedOrientation)
+      return TaskPlacement{};
     shapes_to_try = getAllPlacementShapes(cgra_count);
   }
 
