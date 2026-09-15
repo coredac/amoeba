@@ -1,0 +1,34 @@
+{
+  "schema": "amoeba-task-shape-cost",
+  "function": "main",
+  "namespace": "stale-test-catalog",
+  "predictor_metadata": {
+    "candidate_manifest_sha256": "CANDIDATE_SHA_PLACEHOLDER",
+    "analytical_provenance": {
+      "architecture_sha256": "ARCHITECTURE_SHA_PLACEHOLDER",
+      "neura_opt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "task_body_sha256": {
+        "A": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "task_dfg_sha256": {
+        "A": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "checkpoints": {
+      "baseline": {
+        "config_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "architecture_contract": {
+      "contract_id": "stale-test-contract",
+      "supported_architecture_sha256": ["ARCHITECTURE_SHA_PLACEHOLDER"]
+    },
+    "ranking_policy": {
+      "objective": "predicted_scheduler_makespan",
+      "mapper_success_probability": "diagnostic_only",
+      "uses_mapper_success_probability": false
+    }
+  },
+  "entries": []
+}

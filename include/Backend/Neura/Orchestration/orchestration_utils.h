@@ -9,6 +9,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -112,6 +113,10 @@ public:
   // task priority map.
   bool schedule(func::FuncOp func, const TaskPriorityMap &priority);
 
+  // Makespan of the placement in predicted cycles. A zero result means that
+  // no tasks were placed or the cycle count overflowed the representable range.
+  int64_t getScheduleMakespan() const { return schedule_makespan_; }
+
 private:
   // Chooses the internal scheduler time scale from task durations.
   void updateScheduleTimeScale(const TaskMemoryGraph &graph);
@@ -163,7 +168,8 @@ private:
   SchedulingMode mode_;
   ShapeSelectionPolicy shape_selection_policy_;
   int total_task_count_ = 0;
-  int schedule_time_scale_ = 1;
+  int64_t schedule_time_scale_ = 1;
+  int64_t schedule_makespan_ = 0;
   std::vector<std::vector<llvm::SmallVector<std::pair<int, int>, 4>>>
       cgra_occupancy_;
 };

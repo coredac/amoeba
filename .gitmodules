@@ -1,3 +1,6 @@
 [submodule "thirdparty/neura"]
 	path = thirdparty/neura
 	url = git@github.com:coredac/neura.git
+[submodule "thirdparty/cgra-ii-predictor"]
+	path = thirdparty/cgra-ii-predictor
+	url = git@github.com:guosran/cgra-ii-predictor.git
