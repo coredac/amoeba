@@ -1,5 +1,6 @@
-// Shared analytical task metadata preserves nested static counter trip counts
-// and rejects dynamic bounds before publishing a candidate manifest.
+// Shared analytical task metadata preserves the longest nested static counter
+// chain across sibling and independent roots, and rejects dynamic bounds
+// before publishing a candidate manifest.
 //
 // RUN: mlir-amoeba-opt %s \
 // RUN:   '--enumerate-analytical-task-candidates=function=static output=%t.static.jsonl max-cgras-per-task=1' \
@@ -27,9 +28,14 @@ module {
       %c1 = arith.constant 1 : index
       %c2 = arith.constant 2 : index
       %c3 = arith.constant 3 : index
+      %c4 = arith.constant 4 : index
+      %c7 = arith.constant 7 : index
       %outer = taskflow.counter from %c0 to %c2 step %c1 : index
       %inner = taskflow.counter parent(%outer : index)
           from %c0 to %c3 step %c1 : index
+      %sibling = taskflow.counter parent(%outer : index)
+          from %c0 to %c4 step %c1 : index
+      %independent = taskflow.counter from %c0 to %c7 step %c1 : index
       taskflow.yield done_reads(%input : memref<16xf32>)
                      done_writes(%output : memref<16xf32>)
     }
@@ -56,6 +62,6 @@ module {
   }
 }
 
-// STATIC: {"candidate_id":"candidate-0","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"Static","trip_count":6}]}
+// STATIC: {"candidate_id":"candidate-0","record_type":"candidate","schema":"amoeba-analytical-task-candidates","task_shapes":[{"shape":{"cgra_count":1,"cgra_shape":"1x1","cols":1,"kind":"rect","mapper_tile_cols":4,"mapper_tile_rows":4,"rows":1},"task":"Static","trip_count":8}]}
 // STATIC-NEXT: {"candidate_count":1,"record_type":"footer","schema":"amoeba-analytical-task-candidates"}
 // DYNAMIC: error: task Dynamic requires constant counter bounds, a positive step, a non-empty range, and a trip count within int64; add an explicit positive trip_count or resolve the counter bounds first

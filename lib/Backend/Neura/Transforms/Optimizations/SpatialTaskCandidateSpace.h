@@ -24,7 +24,7 @@
 namespace mlir {
 namespace amoeba {
 namespace neura {
-namespace analytical_dse {
+namespace analytical_candidates {
 
 inline constexpr llvm::StringLiteral kShapePolicy =
     "static-oriented-rectangles";
@@ -32,15 +32,14 @@ inline constexpr llvm::StringLiteral kSearchScope =
     "static-shape-concurrent-fit";
 inline constexpr llvm::StringLiteral kSpatialCapacityPolicy =
     "all-tasks-simultaneous-exact-pack";
-inline constexpr llvm::StringLiteral kShapePruningPolicy =
-    "none";
+inline constexpr llvm::StringLiteral kShapePruningPolicy = "none";
 
 // Stores one physical-CGRA rectangle and its corresponding mapper dimensions.
 struct RectShape {
   int64_t rows = 1;
   int64_t cols = 1;
-  int64_t mapperRows = 1;
-  int64_t mapperCols = 1;
+  int64_t mapper_rows = 1;
+  int64_t mapper_cols = 1;
 
   int64_t cgraCount() const { return rows * cols; }
   std::string toCgraShapeAttrValue() const;
@@ -49,7 +48,7 @@ struct RectShape {
 // Stores one task's shape choice within a program candidate.
 struct TaskShapeChoice {
   std::string task;
-  int64_t tripCount = 1;
+  int64_t trip_count = 1;
   RectShape shape;
 };
 
@@ -67,36 +66,35 @@ using ShapeIndexTupleConsumer =
 // fit, so many ordered candidates share one small backtracking result.
 class ConcurrentPackingCache {
 public:
-  ConcurrentPackingCache(int64_t gridRows, int64_t gridCols)
-      : gridRows_(gridRows), gridCols_(gridCols) {}
+  ConcurrentPackingCache(int64_t grid_rows, int64_t grid_cols)
+      : grid_rows_(grid_rows), grid_cols_(grid_cols) {}
 
   bool canPack(llvm::ArrayRef<RectShape> shapes);
-  int64_t gridRows() const { return gridRows_; }
-  int64_t gridCols() const { return gridCols_; }
+  int64_t gridRows() const { return grid_rows_; }
+  int64_t gridCols() const { return grid_cols_; }
 
 private:
   using Key = std::vector<std::pair<int64_t, int64_t>>;
 
-  int64_t gridRows_ = 0;
-  int64_t gridCols_ = 0;
+  int64_t grid_rows_ = 0;
+  int64_t grid_cols_ = 0;
   std::map<Key, bool> results_;
 };
 
-llvm::SmallVector<RectShape> enumerateStaticRectShapes(int64_t gridRows,
-                                                       int64_t gridCols,
-                                                       int64_t perCgraRows,
-                                                       int64_t perCgraCols,
-                                                       int64_t maxCgrasPerTask);
+llvm::SmallVector<RectShape>
+enumerateStaticRectShapes(int64_t grid_rows, int64_t grid_cols,
+                          int64_t per_cgra_rows, int64_t per_cgra_cols,
+                          int64_t max_cgras_per_task);
 // Visits every shape tuple that admits a simultaneous, non-overlapping
-// placement on the physical grid. `shapeIndices` follows task order and indexes
-// the corresponding task's shape alphabet; the valid candidate index is
+// placement on the physical grid. `shape_indices` follows task order and
+// indexes the corresponding task's shape alphabet; the valid candidate index is
 // contiguous and starts at zero. Returns
 // false only when the consumer requests an early stop.
 bool visitConcurrentlyPackableShapeTuples(
-    llvm::ArrayRef<llvm::SmallVector<RectShape>> shapesByTask,
+    llvm::ArrayRef<llvm::SmallVector<RectShape>> shapes_by_task,
     ConcurrentPackingCache &packing, ShapeIndexTupleConsumer consume);
 llvm::json::Object candidateJson(const Candidate &candidate);
-} // namespace analytical_dse
+} // namespace analytical_candidates
 } // namespace neura
 } // namespace amoeba
 } // namespace mlir

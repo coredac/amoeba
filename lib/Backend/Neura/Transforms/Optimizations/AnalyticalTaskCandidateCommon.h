@@ -27,7 +27,7 @@
 namespace mlir {
 namespace amoeba {
 namespace neura {
-namespace analytical_dse {
+namespace analytical_candidates {
 
 inline constexpr llvm::StringLiteral kCandidateSchema =
     "amoeba-analytical-task-candidates";
@@ -39,8 +39,8 @@ inline constexpr llvm::StringLiteral kSourceTaskBodyShaAttr =
 struct TaskMetadata {
   taskflow::TaskflowTaskOp op;
   std::string name;
-  std::string bodySha256;
-  int64_t tripCount = 1;
+  std::string body_sha256;
+  int64_t trip_count = 1;
 };
 
 FailureOr<llvm::SmallVector<TaskMetadata>>
@@ -60,10 +60,10 @@ void writeJsonLine(llvm::raw_ostream &os, llvm::json::Object object);
 // Publishes a complete output atomically so consumers never read a partial
 // candidate manifest.
 bool writeAtomically(llvm::StringRef output,
-                     llvm::function_ref<bool(llvm::raw_ostream &)> writeBody,
+                     llvm::function_ref<bool(llvm::raw_ostream &)> write_body,
                      std::string &error);
 
-} // namespace analytical_dse
+} // namespace analytical_candidates
 } // namespace neura
 } // namespace amoeba
 } // namespace mlir
