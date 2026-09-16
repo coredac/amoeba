@@ -213,13 +213,18 @@ struct TaskNode {
 
   // Returns the task's execution duration in time slots.
   //
-  // Reads from profile_info.duration if present (written by
+  // A fixed analytical candidate can supply a predicted est_latency.
+  // Otherwise reads from profile_info.duration if present (written by
   // ResourceAwareTaskOptimizationPass after profiling).
   // Defaults to 1 when no profiling data is available.
-  int getDuration() const {
+  int64_t getDuration() const {
+    if (op->hasAttr("amoeba.analytical_shape_orientation_fixed")) {
+      if (auto estimate = op->getAttrOfType<IntegerAttr>("est_latency"))
+        return std::max<int64_t>(1, estimate.getInt());
+    }
     if (auto profile = op->getAttrOfType<DictionaryAttr>("profile_info")) {
       if (auto dur = dyn_cast_or_null<IntegerAttr>(profile.get("duration"))) {
-        return std::max(1, static_cast<int>(dur.getInt()));
+        return std::max<int64_t>(1, dur.getInt());
       }
     }
     return 1;
@@ -347,6 +352,7 @@ TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode,
 // Schedules all tasks and performs iterative SRAM assignment for `func`.
 bool TaskScheduler::schedule(func::FuncOp func,
                              const TaskPriorityMap &priority) {
+  schedule_makespan_ = 0;
   SmallVector<TaskflowTaskOp> tasks;
   func.walk([&](TaskflowTaskOp task) { tasks.push_back(task); });
 
@@ -505,6 +511,22 @@ bool TaskScheduler::schedule(func::FuncOp func,
     }
   }
 
+  // Placement uses a bounded internal time axis. Convert each placed start
+  // back to predicted cycles and retain its full task duration for ranking.
+  for (const auto &task_node : graph.task_nodes) {
+    if (task_node->placement.empty())
+      continue;
+    int64_t start = task_node->placement.front().start_time;
+    int64_t duration = task_node->getDuration();
+    if (start > (std::numeric_limits<int64_t>::max() - duration) /
+                    schedule_time_scale_) {
+      schedule_makespan_ = 0;
+      break;
+    }
+    schedule_makespan_ =
+        std::max(schedule_makespan_, start * schedule_time_scale_ + duration);
+  }
+
   // Write output attributes.
   OpBuilder builder(func.getContext());
   for (auto &task_node : graph.task_nodes) {
@@ -581,9 +603,11 @@ bool TaskScheduler::schedule(func::FuncOp func,
     // downstream passes can read the task duration without re-computing it.
     if (!task_node->op->hasAttr("profile_info")) {
       SmallVector<NamedAttribute, 1> profile_attrs;
-      profile_attrs.push_back(
-          NamedAttribute(StringAttr::get(func.getContext(), "duration"),
-                         builder.getI32IntegerAttr(task_node->getDuration())));
+      profile_attrs.push_back(NamedAttribute(
+          StringAttr::get(func.getContext(), "duration"),
+          builder.getI32IntegerAttr(static_cast<int32_t>(
+              std::min<int64_t>(task_node->getDuration(),
+                                std::numeric_limits<int32_t>::max())))));
       task_node->op->setAttr(
           "profile_info",
           DictionaryAttr::get(func.getContext(), profile_attrs));
@@ -609,8 +633,8 @@ void TaskScheduler::updateScheduleTimeScale(const TaskMemoryGraph &graph) {
     max_duration =
         std::max(max_duration, static_cast<int64_t>(task_node->getDuration()));
   }
-  schedule_time_scale_ = static_cast<int>(std::max<int64_t>(
-      1, llvm::divideCeil(max_duration, kMaxInternalDuration)));
+  schedule_time_scale_ = std::max<int64_t>(
+      1, llvm::divideCeil(max_duration, kMaxInternalDuration));
 }
 
 int TaskScheduler::getScheduleDuration(const TaskNode *task_node) const {
