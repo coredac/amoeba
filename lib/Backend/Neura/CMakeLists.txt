@@ -1,3 +1,6 @@
+# Leaf library for CLI option storage shared by the backend entry point and
+# optimization passes; keeping it separate avoids a Backend/Optimizations
+# dependency cycle.
 add_mlir_library(MLIRAmoebaNeuraBackendOptions
   NeuraBackendOptions.cpp
 

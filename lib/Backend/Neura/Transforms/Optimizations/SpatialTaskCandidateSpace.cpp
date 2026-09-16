@@ -5,7 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SpatialTaskCandidateSpace.h"
+#include "Backend/Neura/Transforms/Optimizations/SpatialTaskCandidateSpace.h"
 
 #include "Backend/Neura/Orchestration/AnalyticalBasedTaskOrchestration/AnalyticalBasedTaskOrchestration.h"
 
@@ -252,6 +252,11 @@ bool ConcurrentPackingCache::canPack(ArrayRef<RectShape> shapes) {
   return result;
 }
 
+// Traverses the task-major Cartesian product in deterministic shape order.
+// The running area rejects impossible prefixes cheaply; complete tuples then
+// use the packing cache for exact fixed-rotation geometry. `consume` receives
+// contiguous IDs only for feasible tuples and may stop traversal by returning
+// false.
 bool visitConcurrentlyPackableShapeTuples(
     ArrayRef<SmallVector<RectShape>> shapes_by_task,
     ConcurrentPackingCache &packing, ShapeIndexTupleConsumer consume) {

@@ -4,10 +4,13 @@
 
 #include "llvm/Support/CommandLine.h"
 
-// Keep the option storage separate from NeuraBackend.cpp. Optimization passes
-// need these values, while the backend itself links the optimization library;
-// defining the options in the backend would introduce a circular library
-// dependency.
+// Keep command-line option storage in a small dependency-neutral library.
+// Candidate-enumeration code in MLIRAmoebaNeuraOptimizations needs the
+// architecture path, while MLIRAmoebaNeuraBackend already links that
+// optimization library. If NeuraBackend.cpp owned the option objects, the
+// optimization library would have to link back to the backend to read them,
+// creating Backend -> Optimizations -> Backend. Both libraries instead depend
+// downward on MLIRAmoebaNeuraBackendOptions through these accessors.
 namespace {
 
 llvm::cl::opt<std::string> neuraArchitectureSpec(

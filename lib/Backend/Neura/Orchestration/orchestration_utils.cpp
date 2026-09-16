@@ -1,8 +1,11 @@
 // Shared CGRA orchestration utilities.
 
 #include "Backend/Neura/Orchestration/orchestration_utils.h"
+#include "NeuraDialect/NeuraOps.h"
 #include "TaskflowDialect/TaskflowOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -14,6 +17,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -148,6 +152,215 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
   }
 
   return shapes;
+}
+
+// Static task-count utilities
+
+namespace {
+
+// Returns a compile-time index value from either task-count IR stage.
+std::optional<int64_t> getConstantIndexValue(Value value) {
+  if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>()) {
+    return constant.value();
+  }
+  if (auto constant = value.getDefiningOp<neura::ConstantOp>()) {
+    return cast<IntegerAttr>(constant.getValueAttr()).getInt();
+  }
+  return std::nullopt;
+}
+
+// Computes one static half-open counter range. Dynamic or invalid ranges have
+// no compile-time trip count, allowing callers to reject or approximate them.
+std::optional<int64_t> computeStaticCounterTripCount(Value lower_value,
+                                                     Value upper_value,
+                                                     Value step_value) {
+  std::optional<int64_t> lower = getConstantIndexValue(lower_value);
+  std::optional<int64_t> upper = getConstantIndexValue(upper_value);
+  std::optional<int64_t> step = getConstantIndexValue(step_value);
+  if (!lower || !upper || !step || *step <= 0 || *upper <= *lower ||
+      (*lower < 0 && *upper > std::numeric_limits<int64_t>::max() + *lower)) {
+    return std::nullopt;
+  }
+
+  int64_t distance = *upper - *lower;
+  return 1 + (distance - 1) / *step;
+}
+
+} // namespace
+
+// Infers a task's static execution count from its Taskflow counter forest.
+// Each counter iterates over the half-open range [lower, upper) with a positive
+// step. Nested counters multiply their counts; sibling chains and independent
+// roots contribute their maximum chain count.
+FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
+                                                           std::string &error) {
+  SmallVector<TaskflowCounterOp> counters;
+  task.walk([&](TaskflowCounterOp counter) { counters.push_back(counter); });
+  if (counters.empty()) {
+    return std::optional<int64_t>{};
+  }
+
+  if (!task.getBody().hasOneBlock()) {
+    error = "task " + task.getTaskName().str() +
+            " must contain exactly one block to infer a static trip count";
+    return failure();
+  }
+
+  SmallVector<TaskflowCounterOp> roots;
+  llvm::DenseMap<Value, SmallVector<TaskflowCounterOp>> children;
+  for (TaskflowCounterOp counter : counters) {
+    if (Value parent = counter.getParentIndex()) {
+      children[parent].push_back(counter);
+    } else {
+      roots.push_back(counter);
+    }
+  }
+  if (roots.empty()) {
+    error = "task " + task.getTaskName().str() +
+            " has counters but no root counter";
+    return failure();
+  }
+
+  llvm::DenseSet<Operation *> active;
+  llvm::DenseSet<Operation *> visited;
+  std::function<FailureOr<int64_t>(TaskflowCounterOp)> chain_trip_count =
+      [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
+    Operation *operation = counter.getOperation();
+    if (!active.insert(operation).second || visited.contains(operation)) {
+      error = "task " + task.getTaskName().str() +
+              " has a cyclic or multiply referenced counter chain";
+      return failure();
+    }
+
+    std::optional<int64_t> count = computeStaticCounterTripCount(
+        counter.getLowerBound(), counter.getUpperBound(), counter.getStep());
+    if (!count) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    int64_t longest_child_chain = 1;
+    auto found = children.find(counter.getCounterIndex());
+    if (found != children.end()) {
+      for (TaskflowCounterOp child : found->second) {
+        FailureOr<int64_t> child_count = chain_trip_count(child);
+        if (failed(child_count)) {
+          return failure();
+        }
+        longest_child_chain = std::max(longest_child_chain, *child_count);
+      }
+    }
+    if (*count > std::numeric_limits<int64_t>::max() / longest_child_chain) {
+      error = "task " + task.getTaskName().str() +
+              " requires constant counter bounds, a positive step, a "
+              "non-empty range, and a trip count within int64";
+      return failure();
+    }
+
+    active.erase(operation);
+    visited.insert(operation);
+    return *count * longest_child_chain;
+  };
+
+  int64_t total = 1;
+  for (TaskflowCounterOp root : roots) {
+    FailureOr<int64_t> root_count = chain_trip_count(root);
+    if (failed(root_count)) {
+      return failure();
+    }
+    total = std::max(total, *root_count);
+  }
+  if (visited.size() != counters.size()) {
+    error = "task " + task.getTaskName().str() +
+            " has a counter disconnected from every root";
+    return failure();
+  }
+  return std::optional<int64_t>{total};
+}
+
+FailureOr<int64_t> resolveStaticTaskTripCount(TaskflowTaskOp task,
+                                              std::string &error) {
+  if (auto attr = task->getAttrOfType<IntegerAttr>("trip_count")) {
+    if (attr.getInt() <= 0) {
+      error =
+          "task " + task.getTaskName().str() + " has non-positive trip_count";
+      return failure();
+    }
+    return attr.getInt();
+  }
+
+  FailureOr<std::optional<int64_t>> inferred =
+      inferStaticTaskTripCount(task, error);
+  if (failed(inferred)) {
+    error += "; add an explicit positive trip_count or resolve the counter "
+             "bounds first";
+    return failure();
+  }
+  return inferred->value_or(1);
+}
+
+int64_t computeBestEffortTaskTripCount(TaskflowTaskOp task) {
+  SmallVector<TaskflowCounterOp> counters;
+  for (Operation &operation : task.getBody().front()) {
+    if (auto counter = dyn_cast<TaskflowCounterOp>(&operation)) {
+      counters.push_back(counter);
+    }
+  }
+
+  if (counters.empty()) {
+    int64_t total = 1;
+    task.walk([&](neura::KernelOp kernel) {
+      int64_t kernel_product = 1;
+      kernel.walk([&](neura::CounterOp counter) {
+        std::optional<int64_t> trip_count = computeStaticCounterTripCount(
+            counter.getLowerBound(), counter.getUpperBound(),
+            counter.getStep());
+        if (trip_count) {
+          kernel_product *= *trip_count;
+        }
+      });
+      total = std::max(total, kernel_product);
+    });
+    return total > 0 ? total : 1;
+  }
+
+  SmallVector<TaskflowCounterOp> roots;
+  llvm::DenseMap<Value, SmallVector<TaskflowCounterOp>> children;
+  for (TaskflowCounterOp counter : counters) {
+    if (Value parent = counter.getParentIndex()) {
+      children[parent].push_back(counter);
+    } else {
+      roots.push_back(counter);
+    }
+  }
+
+  auto counter_trip_count = [&](TaskflowCounterOp counter) -> int64_t {
+    return computeStaticCounterTripCount(counter.getLowerBound(),
+                                         counter.getUpperBound(),
+                                         counter.getStep())
+        .value_or(1);
+  };
+
+  int64_t total = 1;
+  for (TaskflowCounterOp root : roots) {
+    int64_t chain_product = 1;
+    SmallVector<TaskflowCounterOp> worklist;
+    worklist.push_back(root);
+    while (!worklist.empty()) {
+      TaskflowCounterOp current = worklist.pop_back_val();
+      chain_product *= counter_trip_count(current);
+      auto found = children.find(current.getCounterIndex());
+      if (found != children.end()) {
+        for (TaskflowCounterOp child : found->second) {
+          worklist.push_back(child);
+        }
+      }
+    }
+    total = std::max(total, chain_product);
+  }
+  return total > 0 ? total : 1;
 }
 
 // Task scheduling utilities
