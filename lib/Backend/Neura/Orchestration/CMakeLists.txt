@@ -18,6 +18,7 @@ add_mlir_library(MLIRAmoebaNeuraOrchestrationUtil
 add_subdirectory(AnalyticalBasedTaskOrchestration)
 add_subdirectory(AnalyticalTaskDSE)
 add_subdirectory(RoutingCriticalPathOrchestration)
+add_subdirectory(PipelineInterval)
 
 add_mlir_library(MLIRAmoebaNeuraOrchestration
     Orchestration.cpp

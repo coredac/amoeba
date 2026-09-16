@@ -65,7 +65,10 @@ def OrchestrateTasksOnAccelerators
       /*default=*/"\"routing-critical-path\"",
       "Task orchestration strategy: 'routing-critical-path' (default) or "
       "'analytical-based-task-orchestration' (requires a materialized "
-      "analytical task candidate).">];
+      "analytical task candidate).">,
+    Option<
+      "commAware", "comm-aware", "bool", /*default=*/"false",
+      "Weight each memory-proximity penalty by transferred data volume.">];
   let constructor =
       "::mlir::amoeba::neura::createOrchestrateTasksOnAcceleratorsPass()";
 }
@@ -176,6 +179,22 @@ def ScoreAnalyticalTaskCandidates
       "::mlir::amoeba::neura::createScoreAnalyticalTaskCandidatesPass()";
   let dependentDialects = ["mlir::arith::ArithDialect",
                            "mlir::func::FuncDialect",
+                           "mlir::taskflow::TaskflowDialect"];
+}
+
+def AnalyzeTaskPipelineInterval
+    : Pass<"analyze-task-pipeline-interval", "func::FuncOp"> {
+  let summary =
+      "Analyze the pipeline interval of scheduled Taskflow tasks";
+  let description = [{
+    Reads taskflow.task operations that contain profile_info.duration and
+    task_orchestration_info.cgra_positions. It reconstructs task data
+    dependences and per-CGRA context order, then writes
+    task_pipeline_interval_info on the parent func.func.
+  }];
+  let constructor =
+      "::mlir::amoeba::neura::createAnalyzeTaskPipelineIntervalPass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
                            "mlir::taskflow::TaskflowDialect"];
 }
 
