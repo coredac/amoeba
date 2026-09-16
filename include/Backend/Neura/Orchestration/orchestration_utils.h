@@ -3,12 +3,16 @@
 #ifndef TASKFLOW_ORCHESTRATION_UTILS_H
 #define TASKFLOW_ORCHESTRATION_UTILS_H
 
+#include "TaskflowDialect/TaskflowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -57,6 +61,25 @@ struct CgraShape {
 //      with smaller bounding-box area as tiebreaker.
 //   2. Non-rectangular shapes (L, T, etc.) in all unique rotations.
 llvm::SmallVector<CgraShape> getAllPlacementShapes(int cgra_count);
+
+// Static task-count utilities.
+
+// Derives a task's static execution count from constant Taskflow counter
+// chains. Returns std::nullopt when the task has no counters and failure for
+// dynamic bounds, malformed counter graphs, empty ranges, or int64_t overflow.
+FailureOr<std::optional<int64_t>> inferStaticTaskTripCount(TaskflowTaskOp task,
+                                                           std::string &error);
+
+// Returns an explicit positive `trip_count` attribute when present; otherwise
+// requires a statically inferable counter forest. A task without counters has
+// one execution.
+FailureOr<int64_t> resolveStaticTaskTripCount(TaskflowTaskOp task,
+                                              std::string &error);
+
+// Computes the legacy optimizer's best-effort trip count. Dynamic bounds are
+// treated as one, and lowered Neura counters are used when no Taskflow counters
+// remain. This intentionally preserves the optimizer's permissive behavior.
+int64_t computeBestEffortTaskTripCount(TaskflowTaskOp task);
 
 // Task scheduling utilities.
 
