@@ -15,11 +15,12 @@ namespace {
 
 std::unique_ptr<Orchestration>
 createOrchestrationStrategy(StringRef strategy_name, int grid_rows,
-                            int grid_cols, SchedulingMode mode) {
+                            int grid_cols, SchedulingMode mode,
+                            bool comm_aware) {
   return llvm::StringSwitch<std::unique_ptr<Orchestration>>(strategy_name)
       .Case("routing-critical-path",
-            std::make_unique<RoutingCriticalPathOrchestration>(grid_rows,
-                                                               grid_cols, mode))
+            std::make_unique<RoutingCriticalPathOrchestration>(
+                grid_rows, grid_cols, mode, comm_aware))
       .Case("analytical-based-task-orchestration",
             std::make_unique<AnalyticalBasedTaskOrchestration>(grid_rows,
                                                                grid_cols, mode))
@@ -60,6 +61,14 @@ struct OrchestrateTasksOnAcceleratorsPass
                      "(requires a materialized analytical task candidate)."),
       llvm::cl::init("routing-critical-path")};
 
+  Option<bool> commAware{
+      *this, "comm-aware",
+      llvm::cl::desc("Weight each memory-proximity penalty by the transferred "
+                     "data volume, so placement minimises "
+                     "sum(volume * distance) instead of sum(distance) "
+                     "(default: false)."),
+      llvm::cl::init(false)};
+
   void runOnOperation() override {
     SchedulingMode mode = (schedulingMode.getValue() == "spatial")
                               ? SchedulingMode::Spatial
@@ -67,7 +76,7 @@ struct OrchestrateTasksOnAcceleratorsPass
     const neura::Architecture &architecture = neura::getArchitecture();
     std::unique_ptr<Orchestration> strategy = createOrchestrationStrategy(
         orchestrationStrategy.getValue(), architecture.getMultiCgraRows(),
-        architecture.getMultiCgraColumns(), mode);
+        architecture.getMultiCgraColumns(), mode, commAware.getValue());
     if (!strategy) {
       getOperation()->emitError() << "unknown task orchestration strategy: "
                                   << orchestrationStrategy.getValue();

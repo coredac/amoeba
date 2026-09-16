@@ -110,7 +110,8 @@ public:
   TaskScheduler(int grid_rows = kCgraGridRows, int grid_cols = kCgraGridCols,
                 SchedulingMode mode = SchedulingMode::SpatialTemporal,
                 ShapeSelectionPolicy shape_selection_policy =
-                    ShapeSelectionPolicy::RotateOrEnumerateShapes);
+                    ShapeSelectionPolicy::RotateOrEnumerateShapes,
+                bool comm_aware = false);
 
   // Schedules and places all Taskflow tasks in `func` using the caller-provided
   // task priority map.
@@ -151,9 +152,17 @@ private:
   bool assignAllSrams(TaskMemoryGraph &graph);
 
   // Searches legal grid positions and returns the best-scoring placement for
-  // one task under the current scheduling mode.
+  // one task under the current scheduling mode.  When `replicas` is greater
+  // than one, all copies are placed at the same instant and the returned
+  // placement contains every copy or is empty.
   TaskPlacement findBestPlacement(TaskNode *task_node, int cgra_count,
-                                  TaskMemoryGraph &graph);
+                                  TaskMemoryGraph &graph, int replicas = 1);
+
+  // Returns compact rectangular shapes that hold `replicas` copies of one
+  // rectangular base shape.  The caller also tries separate base shapes when
+  // a compact shape cannot fit.
+  llvm::SmallVector<CgraShape> replicaSetShapes(const CgraShape &base,
+                                                int replicas);
 
   // Parses a cgra_shape attribute string into its base placement shape.
   CgraShape parseCgraShapeToBase(StringRef cgra_shape, int cgra_count);
@@ -163,13 +172,14 @@ private:
 
   // Scores a candidate placement using proximity to dependent tasks, assigned
   // SRAMs, and context reuse cost.
-  int computeScore(TaskNode *task_node, const TaskPlacement &placement,
-                   TaskMemoryGraph &graph);
+  int64_t computeScore(TaskNode *task_node, const TaskPlacement &placement,
+                       TaskMemoryGraph &graph);
 
   int grid_rows_;
   int grid_cols_;
   SchedulingMode mode_;
   ShapeSelectionPolicy shape_selection_policy_;
+  bool comm_aware_ = false;
   int total_task_count_ = 0;
   int64_t schedule_time_scale_ = 1;
   int64_t schedule_makespan_ = 0;
