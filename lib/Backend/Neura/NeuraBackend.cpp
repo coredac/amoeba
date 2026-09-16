@@ -1,6 +1,7 @@
 //===- NeuraBackend.cpp - Neura backend integration ----------------------===//
 
 #include "Backend/Neura/NeuraBackend.h"
+#include "Backend/Neura/NeuraBackendOptions.h"
 #include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "Conversion/NeuraConversionPasses.h"
@@ -10,39 +11,14 @@
 #include "NeuraDialect/Util/ArchParser.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/Support/LogicalResult.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using mlir::neura::Architecture;
 using mlir::neura::util::ArchParser;
 
-namespace {
-
-llvm::cl::opt<std::string> neuraArchitectureSpec(
-    "neura-architecture-spec",
-    llvm::cl::desc("Path to the Neura architecture specification"),
-    llvm::cl::value_desc("path"), llvm::cl::init(""));
-
-llvm::cl::alias
-    architectureSpecAlias("architecture-spec",
-                          llvm::cl::desc("Alias for --neura-architecture-spec"),
-                          llvm::cl::aliasopt(neuraArchitectureSpec));
-
-llvm::cl::opt<std::string>
-    neuraLatencySpec("neura-latency-spec",
-                     llvm::cl::desc("Path to the Neura latency specification"),
-                     llvm::cl::value_desc("path"), llvm::cl::init(""));
-
-llvm::cl::alias
-    latencySpecAlias("latency-spec",
-                     llvm::cl::desc("Alias for --neura-latency-spec"),
-                     llvm::cl::aliasopt(neuraLatencySpec));
-
-} // namespace
-
 const Architecture &mlir::neura::getArchitecture() {
   static Architecture architecture = []() {
-    ArchParser parser(neuraArchitectureSpec.getValue());
+    ArchParser parser(mlir::amoeba::getNeuraArchitectureSpecFile());
     auto result = parser.getArchitecture();
     if (failed(result))
       llvm::report_fatal_error("[neura-backend] Failed to get architecture.");
@@ -52,7 +28,7 @@ const Architecture &mlir::neura::getArchitecture() {
 }
 
 const std::string &mlir::neura::getLatencySpecFile() {
-  return neuraLatencySpec.getValue();
+  return mlir::amoeba::getNeuraLatencySpecFile();
 }
 
 void mlir::amoeba::registerNeuraBackend(DialectRegistry &registry) {
