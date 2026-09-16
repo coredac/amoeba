@@ -35,7 +35,7 @@ using namespace mlir::taskflow;
 namespace mlir {
 namespace amoeba {
 namespace neura {
-namespace analytical_dse {
+namespace analytical_candidates {
 
 // Infers the execution count recorded in analytical candidate manifests from
 // a task's static Taskflow counter forest. Each counter iterates over the
@@ -185,7 +185,8 @@ static std::string sha256(StringRef bytes) {
 FailureOr<std::string> currentArchitectureSha256(std::string &error) {
   StringRef path = mlir::amoeba::getNeuraArchitectureSpecFile();
   if (path.empty()) {
-    error = "analytical task DSE requires --architecture-spec";
+    error = "analytical task candidate enumeration requires "
+            "--architecture-spec";
     return failure();
   }
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
@@ -227,18 +228,19 @@ static FailureOr<int64_t> resolveAnalyticalTripCount(TaskflowTaskOp task,
 // The enumerator writes this hash into each task record and attaches it to the
 // bound IR; materialization and the predictor use it to bind derived data to
 // the source task. A task-body edit changes the hash, so manifest validation
-// rejects old candidates and predictions. DSE outputs and measurements are
-// deliberately excluded so materializing or measuring a shape does not make
-// the same source computation look new.
+// rejects old candidates and predictions. Candidate outputs and measurements
+// are deliberately excluded so materializing or measuring a shape does not
+// make the same source computation look new.
 static std::string taskBodySha256(TaskflowTaskOp task) {
   Operation *clone = task->clone();
-  auto destroyClone = llvm::make_scope_exit([&] { clone->destroy(); });
+  auto destroy_clone = llvm::make_scope_exit([&] { clone->destroy(); });
   clone->setAttr("task_name",
                  StringAttr::get(task.getContext(), "__analytical_task__"));
   for (StringRef attribute :
        {"trip_count", "cgra_count", "cgra_shape", "compiled_ii", "profile_info",
-        "task_orchestration_info", "replicas", "tiling", "est_latency"})
+        "task_orchestration_info", "replicas", "tiling", "est_latency"}) {
     clone->removeAttr(attribute);
+  }
   clone->removeAttr("amoeba.analytical_shape_orientation_fixed");
   clone->removeAttr(kSourceTaskBodyShaAttr);
   std::string printed;
@@ -258,20 +260,22 @@ FailureOr<SmallVector<TaskMetadata>>
 collectAnalyticalTaskMetadata(func::FuncOp func, std::string &error) {
   SmallVector<TaskMetadata> tasks;
   llvm::StringSet<> names;
-  WalkResult walkResult = func.walk([&](TaskflowTaskOp task) {
+  WalkResult walk_result = func.walk([&](TaskflowTaskOp task) {
     std::string name = task.getTaskName().str();
     if (!names.insert(name).second) {
       error = "duplicate task name " + name;
       return WalkResult::interrupt();
     }
-    FailureOr<int64_t> tripCount = resolveAnalyticalTripCount(task, error);
-    if (failed(tripCount))
+    FailureOr<int64_t> trip_count = resolveAnalyticalTripCount(task, error);
+    if (failed(trip_count)) {
       return WalkResult::interrupt();
-    tasks.push_back({task, std::move(name), taskBodySha256(task), *tripCount});
+    }
+    tasks.push_back({task, std::move(name), taskBodySha256(task), *trip_count});
     return WalkResult::advance();
   });
-  if (walkResult.wasInterrupted())
+  if (walk_result.wasInterrupted()) {
     return failure();
+  }
   if (tasks.empty()) {
     error = "function contains no taskflow.task operations";
     return failure();
@@ -290,7 +294,7 @@ void writeJsonLine(llvm::raw_ostream &os, llvm::json::Object object) {
 // Publishes a complete output atomically so consumers never read a partial
 // candidate manifest.
 bool writeAtomically(StringRef output,
-                     llvm::function_ref<bool(llvm::raw_ostream &)> writeBody,
+                     llvm::function_ref<bool(llvm::raw_ostream &)> write_body,
                      std::string &error) {
   if (output.empty()) {
     error = "output path is required";
@@ -311,7 +315,7 @@ bool writeAtomically(StringRef output,
   bool ok = false;
   {
     llvm::raw_fd_ostream os(descriptor, /*shouldClose=*/true);
-    ok = writeBody(os);
+    ok = write_body(os);
     os.flush();
     if (os.has_error()) {
       error = "failed while writing " + output.str();
@@ -341,9 +345,9 @@ FailureOr<func::FuncOp> selectTaskFunction(ModuleOp module, StringRef requested,
       error = "requested function " + requested.str() + " does not exist";
       return failure();
     }
-    bool hasTask = false;
-    function.walk([&](TaskflowTaskOp) { hasTask = true; });
-    if (!hasTask) {
+    bool has_task = false;
+    function.walk([&](TaskflowTaskOp) { has_task = true; });
+    if (!has_task) {
       error = "requested function " + requested.str() +
               " contains no taskflow.task operations";
       return failure();
@@ -351,22 +355,23 @@ FailureOr<func::FuncOp> selectTaskFunction(ModuleOp module, StringRef requested,
     return function;
   }
 
-  SmallVector<func::FuncOp> taskFunctions;
+  SmallVector<func::FuncOp> task_functions;
   for (func::FuncOp function : module.getOps<func::FuncOp>()) {
-    bool hasTask = false;
-    function.walk([&](TaskflowTaskOp) { hasTask = true; });
-    if (hasTask)
-      taskFunctions.push_back(function);
+    bool has_task = false;
+    function.walk([&](TaskflowTaskOp) { has_task = true; });
+    if (has_task) {
+      task_functions.push_back(function);
+    }
   }
-  if (taskFunctions.size() != 1) {
+  if (task_functions.size() != 1) {
     error = "expected exactly one function containing Taskflow tasks; use the "
             "function option when the module contains more than one";
     return failure();
   }
-  return taskFunctions.front();
+  return task_functions.front();
 }
 
-} // namespace analytical_dse
+} // namespace analytical_candidates
 } // namespace neura
 } // namespace amoeba
 } // namespace mlir

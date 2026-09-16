@@ -21,7 +21,7 @@
 #include <string>
 
 using namespace mlir;
-using namespace mlir::amoeba::neura::analytical_dse;
+using namespace mlir::amoeba::neura::analytical_candidates;
 
 namespace {
 
@@ -44,18 +44,18 @@ struct EnumerateAnalyticalTaskCandidatesPass
            "running the mapper";
   }
 
-  Option<std::string> functionName{
+  Option<std::string> function_name{
       *this, "function",
       llvm::cl::desc("Taskflow function; inferred when exactly one exists."),
       llvm::cl::init("")};
-  Option<std::string> outputFile{*this, "output",
-                                 llvm::cl::desc("Candidate JSONL output path."),
-                                 llvm::cl::init("")};
-  Option<int64_t> maxCandidates{
+  Option<std::string> output_file{
+      *this, "output", llvm::cl::desc("Candidate JSONL output path."),
+      llvm::cl::init("")};
+  Option<int64_t> max_candidates{
       *this, "max-candidates",
       llvm::cl::desc("Fails rather than publishing a partial manifest."),
       llvm::cl::init(1000000)};
-  Option<int64_t> maxCgrasPerTask{
+  Option<int64_t> max_cgras_per_task{
       *this, "max-cgras-per-task",
       llvm::cl::desc(
           "Limits each task footprint; zero uses the full physical grid."),
@@ -67,15 +67,15 @@ struct EnumerateAnalyticalTaskCandidatesPass
     // artifacts can bind to the same body.
     ModuleOp module = getOperation();
     std::string error;
-    FailureOr<func::FuncOp> selectedFunction =
-        selectTaskFunction(module, functionName.getValue(), error);
-    if (failed(selectedFunction)) {
+    FailureOr<func::FuncOp> selected_function =
+        selectTaskFunction(module, function_name.getValue(), error);
+    if (failed(selected_function)) {
       module.emitError() << error;
       return signalPassFailure();
     }
-    func::FuncOp func = *selectedFunction;
-    if (outputFile.getValue().empty() || maxCandidates.getValue() <= 0 ||
-        maxCgrasPerTask.getValue() < 0) {
+    func::FuncOp func = *selected_function;
+    if (output_file.getValue().empty() || max_candidates.getValue() <= 0 ||
+        max_cgras_per_task.getValue() < 0) {
       func.emitError() << "output, positive max-candidates, and nonnegative "
                           "max-cgras-per-task are required";
       return signalPassFailure();
@@ -84,39 +84,39 @@ struct EnumerateAnalyticalTaskCandidatesPass
     // Collects task metadata and builds the single-task shape alphabet from the
     // architecture values read by Neura's YAML loader. Dynamic or unresolved
     // trip counts are rejected by the static candidate-space contract.
-    FailureOr<SmallVector<TaskMetadata>> taskMetadata =
+    FailureOr<SmallVector<TaskMetadata>> task_metadata =
         collectAnalyticalTaskMetadata(func, error);
-    if (failed(taskMetadata)) {
+    if (failed(task_metadata)) {
       func.emitError() << error;
       return signalPassFailure();
     }
     const ::mlir::neura::Architecture &architecture =
         ::mlir::neura::getArchitecture();
-    const int64_t gridRows = architecture.getMultiCgraRows();
-    const int64_t gridCols = architecture.getMultiCgraColumns();
-    if (gridRows <= 0 || gridCols <= 0 ||
-        gridRows > std::numeric_limits<int64_t>::max() / gridCols) {
+    const int64_t grid_rows = architecture.getMultiCgraRows();
+    const int64_t grid_cols = architecture.getMultiCgraColumns();
+    if (grid_rows <= 0 || grid_cols <= 0 ||
+        grid_rows > std::numeric_limits<int64_t>::max() / grid_cols) {
       func.emitError() << "physical CGRA grid dimensions are invalid";
       return signalPassFailure();
     }
-    const int64_t gridArea = gridRows * gridCols;
-    const int64_t effectiveMaxCgrasPerTask =
-        maxCgrasPerTask.getValue() == 0
-            ? gridArea
-            : std::min(maxCgrasPerTask.getValue(), gridArea);
+    const int64_t grid_area = grid_rows * grid_cols;
+    const int64_t effective_max_cgras_per_task =
+        max_cgras_per_task.getValue() == 0
+            ? grid_area
+            : std::min(max_cgras_per_task.getValue(), grid_area);
     SmallVector<RectShape> shapes = enumerateStaticRectShapes(
-        gridRows, gridCols, architecture.getPerCgraRows(),
-        architecture.getPerCgraColumns(), effectiveMaxCgrasPerTask);
+        grid_rows, grid_cols, architecture.getPerCgraRows(),
+        architecture.getPerCgraColumns(), effective_max_cgras_per_task);
     if (shapes.empty()) {
       func.emitError() << "declared rectangular shape space is empty";
       return signalPassFailure();
     }
     // TODO: Introduce an explicit, validated shape-pruning policy after the
     // complete rectangular space has a stable downstream contract.
-    SmallVector<SmallVector<RectShape>> shapesByTask(taskMetadata->size(),
-                                                     shapes);
-    FailureOr<std::string> architectureSha = currentArchitectureSha256(error);
-    if (failed(architectureSha)) {
+    SmallVector<SmallVector<RectShape>> shapes_by_task(task_metadata->size(),
+                                                       shapes);
+    FailureOr<std::string> architecture_sha = currentArchitectureSha256(error);
+    if (failed(architecture_sha)) {
       func.emitError() << error;
       return signalPassFailure();
     }
@@ -126,36 +126,39 @@ struct EnumerateAnalyticalTaskCandidatesPass
     // an exact simultaneous, non-overlapping placement on the physical grid.
     // The concrete origins remain a downstream heuristic choice; temporal
     // reuse cannot rescue an over-capacity tuple in this search scope.
-    uint64_t candidateCount = 0;
-    bool exceededLimit = false;
-    ConcurrentPackingCache packing(gridRows, gridCols);
-    SmallVector<SmallVector<uint8_t>> usedCostQueries(taskMetadata->size());
-    for (auto [taskIndex, used] : llvm::enumerate(usedCostQueries))
-      used.assign(shapesByTask[taskIndex].size(), 0);
-    bool countedAll = visitConcurrentlyPackableShapeTuples(
-        shapesByTask, packing,
-        [&](uint64_t index, ArrayRef<size_t> shapeIndices) {
-          if (index >= static_cast<uint64_t>(maxCandidates.getValue())) {
-            exceededLimit = true;
+    uint64_t candidate_count = 0;
+    bool exceeded_limit = false;
+    ConcurrentPackingCache packing(grid_rows, grid_cols);
+    SmallVector<SmallVector<uint8_t>> used_cost_queries(task_metadata->size());
+    for (auto [task_index, used] : llvm::enumerate(used_cost_queries)) {
+      used.assign(shapes_by_task[task_index].size(), 0);
+    }
+    bool counted_all = visitConcurrentlyPackableShapeTuples(
+        shapes_by_task, packing,
+        [&](uint64_t index, ArrayRef<size_t> shape_indices) {
+          if (index >= static_cast<uint64_t>(max_candidates.getValue())) {
+            exceeded_limit = true;
             return false;
           }
-          candidateCount = index + 1;
-          for (auto [taskIndex, shapeIndex] : llvm::enumerate(shapeIndices))
-            usedCostQueries[taskIndex][shapeIndex] = 1;
+          candidate_count = index + 1;
+          for (auto [task_index, shape_index] :
+               llvm::enumerate(shape_indices)) {
+            used_cost_queries[task_index][shape_index] = 1;
+          }
           return true;
         });
-    if (!countedAll && exceededLimit) {
+    if (!counted_all && exceeded_limit) {
       func.emitError() << "complete concurrently packable shape space exceeds "
                           "max-candidates="
-                       << maxCandidates.getValue()
+                       << max_candidates.getValue()
                        << "; refusing to publish a partial candidate manifest";
       return signalPassFailure();
     }
-    if (!countedAll) {
+    if (!counted_all) {
       func.emitError() << "failed while counting the packable shape space";
       return signalPassFailure();
     }
-    if (candidateCount == 0) {
+    if (candidate_count == 0) {
       func.emitError() << "no task shape tuple can fit simultaneously on the "
                           "physical CGRA grid";
       return signalPassFailure();
@@ -163,7 +166,7 @@ struct EnumerateAnalyticalTaskCandidatesPass
 
     const std::string function = func.getSymName().str();
     bool wrote = writeAtomically(
-        outputFile.getValue(),
+        output_file.getValue(),
         [&](llvm::raw_ostream &os) {
           // Freezes every input needed to reconstruct the candidate space. The
           // architecture YAML hash and each source-task body hash bind this
@@ -171,47 +174,48 @@ struct EnumerateAnalyticalTaskCandidatesPass
           // and materializer consume. The cost-query list contains exactly
           // the task/shape pairs referenced by at least one feasible
           // candidate.
-          llvm::json::Object architectureRecord;
-          architectureRecord["grid_rows"] =
+          llvm::json::Object architecture_record;
+          architecture_record["grid_rows"] =
               int64_t{architecture.getMultiCgraRows()};
-          architectureRecord["grid_cols"] =
+          architecture_record["grid_cols"] =
               int64_t{architecture.getMultiCgraColumns()};
-          architectureRecord["per_cgra_tile_rows"] =
+          architecture_record["per_cgra_tile_rows"] =
               int64_t{architecture.getPerCgraRows()};
-          architectureRecord["per_cgra_tile_cols"] =
+          architecture_record["per_cgra_tile_cols"] =
               int64_t{architecture.getPerCgraColumns()};
-          architectureRecord["spec_sha256"] = *architectureSha;
+          architecture_record["spec_sha256"] = *architecture_sha;
           llvm::json::Array tasks;
-          for (const TaskMetadata &task : *taskMetadata) {
+          for (const TaskMetadata &task : *task_metadata) {
             llvm::json::Object record;
             record["task"] = task.name;
-            record["body_sha256"] = task.bodySha256;
-            record["trip_count"] = task.tripCount;
+            record["body_sha256"] = task.body_sha256;
+            record["trip_count"] = task.trip_count;
             tasks.push_back(std::move(record));
           }
-          llvm::json::Array costQueries;
-          for (auto [taskIndex, task] : llvm::enumerate(*taskMetadata)) {
-            for (auto [shapeIndex, shape] :
-                 llvm::enumerate(shapesByTask[taskIndex])) {
-              if (!usedCostQueries[taskIndex][shapeIndex])
+          llvm::json::Array cost_queries;
+          for (auto [task_index, task] : llvm::enumerate(*task_metadata)) {
+            for (auto [shape_index, shape] :
+                 llvm::enumerate(shapes_by_task[task_index])) {
+              if (!used_cost_queries[task_index][shape_index]) {
                 continue;
+              }
               llvm::json::Object query;
               query["task"] = task.name;
-              query["mapper_tile_rows"] = shape.mapperRows;
-              query["mapper_tile_cols"] = shape.mapperCols;
-              costQueries.push_back(std::move(query));
+              query["mapper_tile_rows"] = shape.mapper_rows;
+              query["mapper_tile_cols"] = shape.mapper_cols;
+              cost_queries.push_back(std::move(query));
             }
           }
           // Records the axes held constant by this static shape-selection
           // contract.
-          llvm::json::Object fixedAxes;
-          fixedAxes["fusion"] = "identity";
-          fixedAxes["fission"] = "factor-1";
-          fixedAxes["tiling"] = "factor-1";
-          fixedAxes["placement"] =
+          llvm::json::Object fixed_axes;
+          fixed_axes["fusion"] = "identity";
+          fixed_axes["fission"] = "factor-1";
+          fixed_axes["tiling"] = "factor-1";
+          fixed_axes["placement"] =
               "exact-fit-required-coordinates-downstream-heuristic";
-          fixedAxes["temporal_order"] = "downstream-heuristic";
-          fixedAxes["communication"] = "not-scored";
+          fixed_axes["temporal_order"] = "downstream-heuristic";
+          fixed_axes["communication"] = "not-scored";
           llvm::json::Object header;
           header["record_type"] = "header";
           header["schema"] = kCandidateSchema.str();
@@ -220,34 +224,34 @@ struct EnumerateAnalyticalTaskCandidatesPass
           header["spatial_capacity_policy"] = kSpatialCapacityPolicy.str();
           header["shape_pruning_policy"] = kShapePruningPolicy.str();
           header["function"] = function;
-          header["architecture"] = std::move(architectureRecord);
-          header["max_cgras_per_task"] = effectiveMaxCgrasPerTask;
+          header["architecture"] = std::move(architecture_record);
+          header["max_cgras_per_task"] = effective_max_cgras_per_task;
           header["tasks"] = std::move(tasks);
-          header["cost_queries"] = std::move(costQueries);
-          header["fixed_axes"] = std::move(fixedAxes);
+          header["cost_queries"] = std::move(cost_queries);
+          header["fixed_axes"] = std::move(fixed_axes);
           writeJsonLine(os, std::move(header));
 
           // Emits every concurrently packable tuple in task-major shape order.
           // A tuple is emitted once even if it has multiple legal placements;
-          // placement itself is not a DSE axis yet.
+          // concrete placement is not part of this candidate space.
           uint64_t emitted = 0;
-          bool emittedAll = visitConcurrentlyPackableShapeTuples(
-              shapesByTask, packing,
-              [&](uint64_t index, ArrayRef<size_t> shapeIndices) {
+          bool emitted_all = visitConcurrentlyPackableShapeTuples(
+              shapes_by_task, packing,
+              [&](uint64_t index, ArrayRef<size_t> shape_indices) {
                 Candidate candidate;
                 candidate.id = makeSequentialCandidateId(index);
-                for (auto [taskIndex, shapeIndex] :
-                     llvm::enumerate(shapeIndices)) {
-                  const TaskMetadata &task = (*taskMetadata)[taskIndex];
+                for (auto [task_index, shape_index] :
+                     llvm::enumerate(shape_indices)) {
+                  const TaskMetadata &task = (*task_metadata)[task_index];
                   candidate.choices.push_back(
-                      {task.name, task.tripCount,
-                       shapesByTask[taskIndex][shapeIndex]});
+                      {task.name, task.trip_count,
+                       shapes_by_task[task_index][shape_index]});
                 }
                 writeJsonLine(os, candidateJson(candidate));
                 emitted = index + 1;
                 return true;
               });
-          if (!emittedAll || emitted != candidateCount) {
+          if (!emitted_all || emitted != candidate_count) {
             error = "internal candidate-count mismatch";
             return false;
           }
@@ -272,12 +276,14 @@ struct EnumerateAnalyticalTaskCandidatesPass
     // IR that looks paired with a usable candidate file. The body-hash routine
     // deliberately ignores this attribute, so re-enumerating this output is
     // idempotent while any real task-body edit still invalidates the manifest.
-    for (const TaskMetadata &task : *taskMetadata)
+    for (const TaskMetadata &task : *task_metadata) {
       task.op->setAttr(kSourceTaskBodyShaAttr,
-                       StringAttr::get(func.getContext(), task.bodySha256));
-    llvm::errs() << "[AnalyticalTaskDSE] enumerated all " << candidateCount
+                       StringAttr::get(func.getContext(), task.body_sha256));
+    }
+    llvm::errs() << "[AnalyticalTaskCandidates] enumerated all "
+                 << candidate_count
                  << " concurrently packable shape candidates into "
-                 << outputFile.getValue() << "\n";
+                 << output_file.getValue() << "\n";
   }
 };
 
