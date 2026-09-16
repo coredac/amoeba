@@ -46,6 +46,11 @@ public:
   getRectangularShapes(int cgra_count, int grid_rows = kCgraGridRows,
                        int grid_cols = kCgraGridCols);
 
+  // Reuses the production routing-critical-path order when estimating a
+  // candidate's makespan. Tasks farther from a dependency-graph sink receive
+  // higher priority.
+  TaskPriorityMap computeRoutingCriticalPathPriority(func::FuncOp func) const;
+
   std::string getName() const override {
     return "analytical-based-task-orchestration";
   }
@@ -65,9 +70,6 @@ private:
   int computeDependencyDepth(Operation *task, TaskSuccessorMap &successors,
                              llvm::DenseMap<Operation *, int> &depth_cache,
                              llvm::DenseSet<Operation *> &visiting) const;
-
-  // Assigns higher priority to tasks farther from a dependency-graph sink.
-  TaskPriorityMap computeRoutingCriticalPathPriority(func::FuncOp func) const;
 
   int grid_rows_;
   int grid_cols_;

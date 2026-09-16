@@ -6,8 +6,10 @@ transformations, and the integration layer used to connect Taskflow programs
 to architecture-specific backends.
 
 [Neura](https://github.com/coredac/neura) is currently the first supported
-backend and is consumed as a pinned Git submodule. The project is structured
-so that additional spatial dataflow backends can be integrated without moving
+backend and is consumed as a pinned Git submodule. Analytical task DSE also
+pins [cgra-ii-predictor](https://github.com/guosran/cgra-ii-predictor) as its
+external task-shape cost oracle. The project is structured so that additional
+spatial dataflow backends can be integrated without moving
 architecture-specific concepts into the Taskflow core.
 
 ## Architecture
@@ -50,7 +52,8 @@ amoeba/
 |   |-- Conversion/            # Backend-independent conversions
 |   `-- Backend/               # Backend adapter implementations
 |-- thirdparty/
-|   `-- neura/                 # Neura Git submodule
+|   |-- neura/                 # Neura Git submodule
+|   `-- cgra-ii-predictor/     # Pinned II model and external adapters
 |-- tools/
 |   `-- mlir-amoeba-opt/       # Amoeba optimizer driver
 `-- test/                      # Core, conversion, end-to-end, and backend tests
@@ -68,6 +71,9 @@ Amoeba requires:
   and
 - Git submodule support.
 
+Running the ML-ranked analytical task DSE driver additionally requires Python
+3 and PyTorch as declared by `thirdparty/cgra-ii-predictor/pyproject.toml`.
+
 This is the same LLVM revision used by the current
 [Neura build instructions](https://github.com/coredac/neura#build-llvm--neura)
 and [Amoeba CI](.github/workflows/main.yml).
@@ -81,7 +87,7 @@ git clone --recurse-submodules git@github.com:coredac/amoeba.git
 cd amoeba
 ```
 
-For an existing checkout, initialize or update the pinned Neura revision with:
+For an existing checkout, initialize or update the pinned dependencies with:
 
 ```bash
 git submodule update --init --recursive
@@ -168,6 +174,58 @@ For example, an affine program can be converted to Taskflow with:
 Neura-specific passes and options are registered by the Neura adapter. The
 architecture and latency options are exposed as `--neura-architecture-spec`
 and `--neura-latency-spec`.
+
+## Analytical task DSE
+
+`tools/run-analytical-task-dse.py` connects Amoeba's candidate passes to the
+pinned II predictor. It freezes the complete concurrently packable static
+rectangle space in C++, extracts one pre-mapper Neura DFG per task, produces
+one provenance-bound cost per task and oriented mapper shape, scores every
+candidate, and invokes the forwarded real pipeline only for deterministic
+top-k entries.
+
+```bash
+./tools/run-analytical-task-dse.py prepared-taskflow.mlir \
+  --architecture test/archspec/architecture.yaml \
+  --top-k 1 \
+  --output-dir /tmp/amoeba-analytical-dse \
+  -- \
+  '--orchestrate-tasks-on-accelerators=orchestration-strategy=analytical-based-task-orchestration scheduling-mode=spatial'
+```
+
+The input must already contain Taskflow tasks with one pre-mapper Neura kernel
+per task. Everything after `--` runs once per validated shortlist entry. The
+Python code consumes the candidate manifest and its declared cost queries; it
+does not enumerate candidates. C++ validates the full candidate space before
+publishing the shortlist.
+
+The current ranking objective is predicted spatial-temporal scheduler
+makespan. Each task duration is
+`startup_cycles + predicted_ii * (trip_count - 1)`; the scorer rounds it up to
+whole cycles and runs the same
+fixed-orientation scheduler and task priority used for materialization.
+Enumeration requires concrete trip counts and rectangular shapes. The default
+`--max-cgras-per-task 0` considers the whole physical grid, and the enumerator
+keeps every legal fixed-orientation rectangle in that range. Communication
+volume, fusion, fission, and tiling are not candidate axes in this spatial
+search.
+
+The DSE artifacts carry explicit SHA-256 provenance. `candidate_manifest_sha256`
+is the hash of the exact candidate JSONL bytes, so a cost catalogue cannot be
+reused after candidate order or contents change. `architecture_sha256` is the
+hash of the exact architecture YAML bytes; grid dimensions alone do not
+identify routing, functional-unit, memory, or latency capabilities. Each
+`task_body_sha256` binds predictor costs to the current task IR after
+DSE-generated attributes are removed; the task's trip count is kept as a
+separate metadata field because it changes duration rather than the task
+computation.
+`task_dfg_sha256` identifies the extracted DFG report used by the predictor.
+The Python adapter binds that report, the Neura executable, model/checkpoint
+weights, and their configuration files to their hashes; the C++ scorer validates
+the declarations but does not reopen those producer files. The score header
+repeats the candidate, architecture, and exact cost-catalogue hashes so the
+driver can verify the complete chain immediately before materializing a
+shortlist.
 
 ## Tests
 
