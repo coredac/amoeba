@@ -13,9 +13,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Backend/Neura/NeuraBackendPasses.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
 #include "TaskflowDialect/TaskflowDialect.h"
 #include "TaskflowDialect/TaskflowOps.h"
-#include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "NeuraDialect/Architecture/Architecture.h"
 #include "NeuraDialect/Mapping/mapping_util.h"
@@ -252,7 +253,7 @@ public:
       if (auto attr = task->getAttrOfType<IntegerAttr>("trip_count")) {
         node->trip_count = attr.getInt();
       } else {
-        node->trip_count = computeTripCount(task);
+        node->trip_count = computeBestEffortTaskTripCount(task);
       }
 
       // Overrides with explicit attributes if present.
@@ -706,121 +707,6 @@ private:
     llvm::errs() << "[profileTask] (partial) ii=" << out_ii
                  << " (res_mii=" << res_mii << ", rec_mii=" << rec_mii
                  << "), steps=" << out_cp_depth << "\n";
-  }
-
-  // Computes total trip count for a task.
-  //
-  // The trip count is extracted from the taskflow.counter chain in the task
-  // body. Each counter has lower_bound, upper_bound, and step attributes.
-  // The trip count of a single counter is:
-  //   ceil((upper_bound - lower_bound) / step)
-  //
-  // Counters form chains (root -> relay -> leaf). The trip count of a chain
-  // is the product of each counter's individual trip count.
-  //
-  // Multiple independent counter chains execute concurrently on the CGRA,
-  // so the total trip count is max(chain_product) across chains.
-  static int64_t computeTripCount(TaskflowTaskOp task) {
-    // Collects all taskflow.counter ops in the task body.
-    SmallVector<TaskflowCounterOp> counters;
-    for (Operation &op : task.getBody().front()) {
-      if (auto counter = dyn_cast<TaskflowCounterOp>(&op))
-        counters.push_back(counter);
-    }
-
-    if (counters.empty()) {
-      // Defensive fallback: try neura.counter ops inside kernels.
-      int64_t total = 1;
-      task.walk([&](neura::KernelOp kernel) {
-        int64_t kernel_product = 1;
-        kernel.walk([&](neura::CounterOp counter_op) {
-          auto getConst = [](Value val) -> std::optional<int64_t> {
-            if (auto cst = val.getDefiningOp<neura::ConstantOp>()) {
-              return cast<IntegerAttr>(cst.getValueAttr()).getInt();
-            }
-            return std::nullopt;
-          };
-          auto lb = getConst(counter_op.getLowerBound());
-          auto ub = getConst(counter_op.getUpperBound());
-          auto st = getConst(counter_op.getStep());
-          if (lb && ub && st && *st > 0) {
-            int64_t range = *ub - *lb;
-            int64_t step = *st;
-            int64_t tc = (range + step - 1) / step;
-            if (tc > 0) {
-              kernel_product *= tc;
-            }
-          }
-          // Dynamic bounds: conservatively treated as trip_count=1 (unchanged
-          // default)
-        });
-        total = std::max(total, kernel_product);
-      });
-      return (total > 0) ? total : 1;
-    }
-
-    // Builds counter chains from taskflow.counter ops.
-    // A root counter has no parent_index. A relay/leaf counter has a
-    // parent_index that is the result of another counter.
-    // Finds root counters (no parent).
-    SmallVector<TaskflowCounterOp> roots;
-    for (auto counter : counters) {
-      if (!counter.getParentIndex())
-        roots.push_back(counter);
-    }
-
-    // Builds a map from parent counter result -> child counters.
-    DenseMap<Value, SmallVector<TaskflowCounterOp>> parent_to_children;
-    for (auto counter : counters) {
-      if (auto parent = counter.getParentIndex())
-        parent_to_children[parent].push_back(counter);
-    }
-
-    auto getConstantIndex = [](Value val) -> int64_t {
-      if (auto cst = val.getDefiningOp<arith::ConstantIndexOp>()) {
-        return cst.value();
-      } else {
-        // Unexpected dynamic bounds.
-        // TODO: support dynamic bounds if needed.
-        assert(false && "Expected constant index for counter parent_index");
-      }
-      return 0;
-    };
-    // Computes trip count for a single counter.
-    auto counterTripCount =
-        [&getConstantIndex](TaskflowCounterOp counter) -> int64_t {
-      int64_t lb = getConstantIndex(counter.getLowerBound());
-      int64_t ub = getConstantIndex(counter.getUpperBound());
-      int64_t step = getConstantIndex(counter.getStep());
-      if (step <= 0) {
-        return 1;
-      }
-      int64_t range = ub - lb;
-      return (range > 0) ? ((range + step - 1) / step) : 1;
-    };
-
-    // DFS from each root, accumulating the product along the chain.
-    // Independent chains are concurrent -> take max across chains.
-    int64_t total = 1;
-    for (auto root : roots) {
-      // Follows chain: root -> children -> grandchildren ...
-      // Chain product = product of all counters in this chain.
-      int64_t chain_product = 1;
-      SmallVector<TaskflowCounterOp> worklist;
-      worklist.push_back(root);
-      while (!worklist.empty()) {
-        auto cur = worklist.pop_back_val();
-        chain_product *= counterTripCount(cur);
-        auto it = parent_to_children.find(cur.getCounterIndex());
-        if (it != parent_to_children.end()) {
-          for (auto child : it->second)
-            worklist.push_back(child);
-        }
-      }
-      total = std::max(total, chain_product);
-    }
-
-    return (total > 0) ? total : 1;
   }
 };
 

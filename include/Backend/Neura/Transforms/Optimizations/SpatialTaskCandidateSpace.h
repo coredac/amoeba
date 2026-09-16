@@ -6,10 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef AMOEBA_SPATIAL_TASK_CANDIDATE_SPACE_H
-#define AMOEBA_SPATIAL_TASK_CANDIDATE_SPACE_H
+#ifndef AMOEBA_BACKEND_NEURA_TRANSFORMS_OPTIMIZATIONS_SPATIAL_TASK_CANDIDATE_SPACE_H
+#define AMOEBA_BACKEND_NEURA_TRANSFORMS_OPTIMIZATIONS_SPATIAL_TASK_CANDIDATE_SPACE_H
 
-#include "AnalyticalTaskCandidateCommon.h"
+#include "Backend/Neura/Transforms/Optimizations/AnalyticalTaskCandidateSupport.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -99,4 +99,4 @@ llvm::json::Object candidateJson(const Candidate &candidate);
 } // namespace amoeba
 } // namespace mlir
 
-#endif // AMOEBA_SPATIAL_TASK_CANDIDATE_SPACE_H
+#endif // AMOEBA_BACKEND_NEURA_TRANSFORMS_OPTIMIZATIONS_SPATIAL_TASK_CANDIDATE_SPACE_H

@@ -1,18 +1,15 @@
-//===- AnalyticalTaskCandidateCommon.h -----------------------*- C++ -*-===//
+//===- AnalyticalTaskCandidateSupport.h ----------------------*- C++ -*-===//
 //
-// Shared task metadata and file/JSON helpers for analytical candidate spaces.
-// Candidate-space implementations provide their own shape and traversal
-// types, so a future temporal space can reuse these utilities independently.
+// Data records plus hashing and file/JSON support shared by analytical
+// candidate-space implementations.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef AMOEBA_ANALYTICAL_TASK_CANDIDATE_COMMON_H
-#define AMOEBA_ANALYTICAL_TASK_CANDIDATE_COMMON_H
+#ifndef AMOEBA_BACKEND_NEURA_TRANSFORMS_OPTIMIZATIONS_ANALYTICAL_TASK_CANDIDATE_SUPPORT_H
+#define AMOEBA_BACKEND_NEURA_TRANSFORMS_OPTIMIZATIONS_ANALYTICAL_TASK_CANDIDATE_SUPPORT_H
 
 #include "TaskflowDialect/TaskflowOps.h"
 
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LLVM.h"
 
 #include "llvm/ADT/FunctionExtras.h"
@@ -43,14 +40,9 @@ struct TaskMetadata {
   int64_t trip_count = 1;
 };
 
-FailureOr<llvm::SmallVector<TaskMetadata>>
-collectAnalyticalTaskMetadata(func::FuncOp func, std::string &error);
-
 FailureOr<std::string> currentArchitectureSha256(std::string &error);
 
-FailureOr<func::FuncOp> selectTaskFunction(ModuleOp module,
-                                           llvm::StringRef requested,
-                                           std::string &error);
+std::string taskBodySha256(taskflow::TaskflowTaskOp task);
 
 std::string makeSequentialCandidateId(uint64_t index);
 
@@ -68,4 +60,4 @@ bool writeAtomically(llvm::StringRef output,
 } // namespace amoeba
 } // namespace mlir
 
-#endif // AMOEBA_ANALYTICAL_TASK_CANDIDATE_COMMON_H
+#endif // AMOEBA_BACKEND_NEURA_TRANSFORMS_OPTIMIZATIONS_ANALYTICAL_TASK_CANDIDATE_SUPPORT_H

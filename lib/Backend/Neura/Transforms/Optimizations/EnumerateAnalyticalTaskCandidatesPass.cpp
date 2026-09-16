@@ -5,14 +5,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SpatialTaskCandidateSpace.h"
+#include "Backend/Neura/Transforms/Optimizations/SpatialTaskCandidateSpace.h"
 
 #include "Backend/Neura/NeuraBackendPasses.h"
+#include "Backend/Neura/Orchestration/orchestration_utils.h"
 
 #include "NeuraDialect/Architecture/Architecture.h"
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/JSON.h"
 
 #include <algorithm>
@@ -22,8 +26,75 @@
 
 using namespace mlir;
 using namespace mlir::amoeba::neura::analytical_candidates;
+using namespace mlir::taskflow;
 
 namespace {
+
+// Selects the requested Taskflow function, or infers it when exactly one
+// function contains tasks.
+FailureOr<func::FuncOp> selectTaskFunction(ModuleOp module, StringRef requested,
+                                           std::string &error) {
+  if (!requested.empty()) {
+    auto function = module.lookupSymbol<func::FuncOp>(requested);
+    if (!function) {
+      error = "requested function " + requested.str() + " does not exist";
+      return failure();
+    }
+    bool has_task = false;
+    function.walk([&](TaskflowTaskOp) { has_task = true; });
+    if (!has_task) {
+      error = "requested function " + requested.str() +
+              " contains no taskflow.task operations";
+      return failure();
+    }
+    return function;
+  }
+
+  SmallVector<func::FuncOp> task_functions;
+  for (func::FuncOp function : module.getOps<func::FuncOp>()) {
+    bool has_task = false;
+    function.walk([&](TaskflowTaskOp) { has_task = true; });
+    if (has_task) {
+      task_functions.push_back(function);
+    }
+  }
+  if (task_functions.size() != 1) {
+    error = "expected exactly one function containing Taskflow tasks; use the "
+            "function option when the module contains more than one";
+    return failure();
+  }
+  return task_functions.front();
+}
+
+// Collects task identity and static execution metadata in manifest task order.
+// Duplicate names are rejected because every candidate references tasks by
+// name and position.
+FailureOr<SmallVector<TaskMetadata>>
+collectAnalyticalTaskMetadata(func::FuncOp func, std::string &error) {
+  SmallVector<TaskMetadata> tasks;
+  llvm::StringSet<> names;
+  WalkResult walk_result = func.walk([&](TaskflowTaskOp task) {
+    std::string name = task.getTaskName().str();
+    if (!names.insert(name).second) {
+      error = "duplicate task name " + name;
+      return WalkResult::interrupt();
+    }
+    FailureOr<int64_t> trip_count = resolveStaticTaskTripCount(task, error);
+    if (failed(trip_count)) {
+      return WalkResult::interrupt();
+    }
+    tasks.push_back({task, std::move(name), taskBodySha256(task), *trip_count});
+    return WalkResult::advance();
+  });
+  if (walk_result.wasInterrupted()) {
+    return failure();
+  }
+  if (tasks.empty()) {
+    error = "function contains no taskflow.task operations";
+    return failure();
+  }
+  return tasks;
+}
 
 struct EnumerateAnalyticalTaskCandidatesPass
     : public PassWrapper<EnumerateAnalyticalTaskCandidatesPass,
