@@ -1702,6 +1702,19 @@ struct ResourceAwareTaskOptimizationPass
   void runOnOperation() override {
     func::FuncOp func = getOperation();
 
+    // A materialized analytical DSE candidate has already fixed each task's
+    // resource count and oriented shape. Reallocating here would invalidate
+    // the candidate selected by the scorer.
+    bool has_fixed_shape = false;
+    func.walk([&](TaskflowTaskOp task) {
+      has_fixed_shape |= task->hasAttr("amoeba.analytical_shape_orientation_fixed");
+    });
+    if (has_fixed_shape) {
+      func.emitError() << "resource-aware-task-optimization cannot run after "
+                          "an analytical task candidate has fixed resource shapes";
+      return signalPassFailure();
+    }
+
     bool use_analytical = (estimationMode.getValue() == "analytical");
 
     llvm::errs() << "=== ResourceAwareTaskOptimization on " << func.getName()
