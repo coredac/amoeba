@@ -47,10 +47,10 @@ struct CgraShape {
 
 // Shape enumeration utilities.
 
-// Generates all placement-candidate shapes for `cgra_count` CGRAs, including
-// rotations. Rectangular shapes include both orientations (rows×cols and
-// cols×rows, deduplicated for squares). Non-rectangular shapes include all
-// four 90° rotations.
+// Generates all placement-candidate rotations for `cgra_count` CGRAs.
+// Rectangles include the rotations produced by swapping rows and columns
+// (deduplicated for squares). Non-rectangular shapes include every unique
+// rotation produced by the four 90-degree turns.
 //
 // Ordering (tried first to last):
 //   1. Rectangular shapes, sorted by squareness (e.g. 2×2 before 1×4),
@@ -68,6 +68,19 @@ enum class SchedulingMode {
   // Adds a time-slot dimension. Tasks that would over-subscribe the grid are
   // scheduled at a later time slot, enabling temporal reuse of CGRAs.
   SpatialTemporal,
+};
+
+// Controls whether the scheduler may rotate a task's cgra_shape attribute.
+enum class ShapeSelectionPolicy {
+  // Generates every legal rotation of a supplied shape. For non-rectangular
+  // shapes, alternatives are obtained by successive 90-degree turns. When no
+  // shape is supplied, enumerates legal shapes with the requested CGRA count.
+  // This policy serves schedulers without an upstream selected rotation.
+  RotateOrEnumerateShapes,
+  // Preserves the supplied cgra_shape rotation exactly as written. The
+  // scheduler does not apply another rotation or enumerate a fallback shape.
+  // The analytical path uses this policy after candidate materialization.
+  FixedOrientation,
 };
 
 // One scheduled CGRA cell assignment for a task.
@@ -94,7 +107,9 @@ using TaskPriorityMap = llvm::DenseMap<Operation *, int>;
 class TaskScheduler {
 public:
   TaskScheduler(int grid_rows = kCgraGridRows, int grid_cols = kCgraGridCols,
-                SchedulingMode mode = SchedulingMode::SpatialTemporal);
+                SchedulingMode mode = SchedulingMode::SpatialTemporal,
+                ShapeSelectionPolicy shape_selection_policy =
+                    ShapeSelectionPolicy::RotateOrEnumerateShapes);
 
   // Schedules and places all Taskflow tasks in `func` using the caller-provided
   // task priority map.
@@ -138,7 +153,7 @@ private:
   // Parses a cgra_shape attribute string into its base placement shape.
   CgraShape parseCgraShapeToBase(StringRef cgra_shape, int cgra_count);
 
-  // Generates all unique rotations of a placement shape.
+  // Generates every unique rotation of a placement shape.
   llvm::SmallVector<CgraShape> rotationsOf(const CgraShape &base);
 
   // Scores a candidate placement using proximity to dependent tasks, assigned
@@ -149,6 +164,7 @@ private:
   int grid_rows_;
   int grid_cols_;
   SchedulingMode mode_;
+  ShapeSelectionPolicy shape_selection_policy_;
   int total_task_count_ = 0;
   int schedule_time_scale_ = 1;
   std::vector<std::vector<llvm::SmallVector<std::pair<int, int>, 4>>>

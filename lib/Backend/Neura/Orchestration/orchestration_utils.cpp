@@ -59,7 +59,7 @@ SmallVector<CgraShape> getNonRectangularShapes(int cgra_count) {
 SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
   SmallVector<CgraShape> shapes;
 
-  // 1. Rectangular shapes with both orientations, deduplicated.
+  // 1. Rectangular shapes with both rotations, deduplicated.
   {
     llvm::DenseSet<int64_t> seen_keys; // encodes (rows<<16)|cols
     for (int row_dim = 1; row_dim <= kCgraGridRows; ++row_dim) {
@@ -68,7 +68,8 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
           int64_t key = ((int64_t)row_dim << 16) | col_dim;
           if (seen_keys.insert(key).second) {
             shapes.push_back({row_dim, col_dim, true, {}});
-            // Adds the rotated orientation if different (e.g. 1×4 -> 4×1).
+            // Adds the result of a 90-degree rotation when it is
+            // different (for example, 1x4 becomes 4x1).
             if (row_dim != col_dim) {
               int64_t rotated_key = ((int64_t)col_dim << 16) | row_dim;
               if (seen_keys.insert(rotated_key).second) {
@@ -90,11 +91,11 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
     });
   }
 
-  // 2. Non-rectangular shapes with all four 90° rotations.
+  // 2. Non-rectangular shapes with all unique rotations.
   auto base_non_rect = getNonRectangularShapes(cgra_count);
   for (const auto &base : base_non_rect) {
-    // Generates 4 rotations of the cgra_positions list.
-    // Rotation by 90° CW: (col, row) -> (row, -col).
+    // Generates four rotations of the cgra_positions list.
+    // A 90-degree clockwise rotation maps (col, row) to (row, -col).
     // Each rotation is normalised so that offsets start from (0, 0).
     SmallVector<SmallVector<std::pair<int, int>>, 4> rotation_variants;
     rotation_variants.push_back(
@@ -103,9 +104,9 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
     auto prev_positions = base.cgra_positions;
     for (int rotation_idx = 0; rotation_idx < 3; ++rotation_idx) {
       SmallVector<std::pair<int, int>> rotated_positions;
+      // Applies a 90-degree clockwise rotation in (col, row) coordinates.
       for (auto &[col_off, row_off] : prev_positions)
-        rotated_positions.push_back(
-            {row_off, -col_off}); // 90° CW in (col, row) space
+        rotated_positions.push_back({row_off, -col_off});
 
       // Normalises to non-negative offsets starting from (0, 0).
       int min_col = INT_MAX, min_row = INT_MAX;
@@ -136,7 +137,7 @@ SmallVector<CgraShape> getAllPlacementShapes(int cgra_count) {
       if (!seen_hashes.insert(hash).second) {
         continue;
       }
-      // Computes bounding box for this rotation.
+      // Computes the bounding box for this rotation.
       int max_col = 0, max_row = 0;
       for (auto &[col_off, row_off] : positions) {
         max_col = std::max(max_col, col_off);
@@ -333,8 +334,10 @@ private:
 // In SpatialTemporal mode, ASAP scheduling is applied via
 // computeEarliestStartTime() so that each ready task starts as soon as all
 // explicit taskflow dependencies have completed.
-TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode)
-    : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode) {
+TaskScheduler::TaskScheduler(int grid_rows, int grid_cols, SchedulingMode mode,
+                             ShapeSelectionPolicy shape_selection_policy)
+    : grid_rows_(grid_rows), grid_cols_(grid_cols), mode_(mode),
+      shape_selection_policy_(shape_selection_policy) {
   cgra_occupancy_.resize(grid_rows_);
   for (auto &row : cgra_occupancy_) {
     row.resize(grid_cols_);
@@ -720,14 +723,28 @@ TaskPlacement TaskScheduler::findBestPlacement(TaskNode *task_node,
                                                int cgra_count,
                                                TaskMemoryGraph &graph) {
   SmallVector<CgraShape> shapes_to_try;
-  if (auto attr = task_node->op->getAttrOfType<StringAttr>("cgra_shape")) {
-    StringRef cgra_shape_str = attr.getValue();
+  auto shape_attr = task_node->op->getAttrOfType<StringAttr>("cgra_shape");
+  if (shape_selection_policy_ == ShapeSelectionPolicy::FixedOrientation) {
+    // A fixed-shape schedule is driven entirely by the materialized candidate.
+    // In particular, the analytical path has already enumerated and selected
+    // the rotation. The scheduler preserves it and does not generate alternate
+    // rotations or enumerate a fallback when the shape is absent.
+    if (!shape_attr || shape_attr.getValue().empty()) {
+      return TaskPlacement{};
+    }
+    shapes_to_try.push_back(
+        parseCgraShapeToBase(shape_attr.getValue(), cgra_count));
+  } else if (shape_attr) {
+    StringRef cgra_shape_str = shape_attr.getValue();
     if (!cgra_shape_str.empty()) {
       CgraShape base = parseCgraShapeToBase(cgra_shape_str, cgra_count);
       shapes_to_try = rotationsOf(base);
     }
   }
   if (shapes_to_try.empty()) {
+    if (shape_selection_policy_ == ShapeSelectionPolicy::FixedOrientation) {
+      return TaskPlacement{};
+    }
     shapes_to_try = getAllPlacementShapes(cgra_count);
   }
 
