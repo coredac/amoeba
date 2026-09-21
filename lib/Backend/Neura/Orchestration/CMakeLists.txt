@@ -8,9 +8,11 @@ add_mlir_library(MLIRAmoebaNeuraOrchestrationUtil
 
     LINK_LIBS PUBLIC
     MLIRIR
+    MLIRArithDialect
     MLIRPass
     MLIRSupport
     MLIRFuncDialect
+    MLIRNeura
     MLIRTaskflow
     LLVMSupport
 )

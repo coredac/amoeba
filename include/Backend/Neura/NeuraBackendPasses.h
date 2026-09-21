@@ -24,6 +24,7 @@ std::unique_ptr<Pass> createConvertTaskflowToNeuraPass();
 std::unique_ptr<Pass> createConstructHyperblockFromTaskPass();
 std::unique_ptr<Pass> createClassifyTaskAndCounterPass();
 std::unique_ptr<Pass> createOrchestrateTasksOnAcceleratorsPass();
+std::unique_ptr<Pass> createEnumerateAnalyticalTaskCandidatesPass();
 std::unique_ptr<Pass> createFuseTaskPass();
 std::unique_ptr<Pass> createResourceAwareTaskOptimizationPass();
 

@@ -3,7 +3,6 @@
 #include "Backend/Neura/Orchestration/AnalyticalBasedTaskOrchestration/AnalyticalBasedTaskOrchestration.h"
 
 #include "TaskflowDialect/TaskflowOps.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -12,9 +11,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>
 #include <limits>
-#include <optional>
 #include <string>
 
 using llvm::SmallVector;
@@ -42,138 +39,6 @@ SmallVector<CgraShape> AnalyticalBasedTaskOrchestration::getRectangularShapes(
     }
   }
   return shapes;
-}
-
-// Infers a task's static execution count from its Taskflow counter forest.
-// Each counter iterates over the half-open range [lower, upper) with a positive
-// step. Nested counters multiply their counts; sibling chains and independent
-// roots contribute their maximum chain count. The routine fails for dynamic
-// bounds, empty ranges, malformed counter graphs, or int64_t overflow.
-FailureOr<std::optional<int64_t>>
-AnalyticalBasedTaskOrchestration::inferStaticTaskTripCount(TaskflowTaskOp task,
-                                                           std::string &error) {
-  // Collects every counter owned by the task. No counters means the manifest
-  // may use the caller's default of one execution.
-  SmallVector<TaskflowCounterOp> counters;
-  task.walk([&](TaskflowCounterOp counter) { counters.push_back(counter); });
-  if (counters.empty()) {
-    return std::optional<int64_t>{};
-  }
-
-  if (!task.getBody().hasOneBlock()) {
-    error = "task " + task.getTaskName().str() +
-            " must contain exactly one block to infer a static trip count";
-    return failure();
-  }
-
-  // Reconstructs the counter forest from parent-index SSA values. Roots have
-  // no parent index; children are keyed by the counter index they reference.
-  SmallVector<TaskflowCounterOp> roots;
-  llvm::DenseMap<Value, SmallVector<TaskflowCounterOp>> children;
-  for (TaskflowCounterOp counter : counters) {
-    if (Value parent = counter.getParentIndex()) {
-      children[parent].push_back(counter);
-    } else {
-      roots.push_back(counter);
-    }
-  }
-  if (roots.empty()) {
-    error = "task " + task.getTaskName().str() +
-            " has counters but no root counter";
-    return failure();
-  }
-
-  // Accepts only arith.constant index bounds so the inferred count is stable
-  // before scheduling and independent of runtime values.
-  auto constant_index = [](Value value) -> FailureOr<int64_t> {
-    if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>()) {
-      return constant.value();
-    }
-    return failure();
-  };
-
-  // Computes ceil((upper - lower) / step) for one non-empty counter range.
-  // The lower-bound check keeps upper - lower representable in int64_t.
-  auto counter_trip_count =
-      [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
-    FailureOr<int64_t> lower = constant_index(counter.getLowerBound());
-    FailureOr<int64_t> upper = constant_index(counter.getUpperBound());
-    FailureOr<int64_t> step = constant_index(counter.getStep());
-    if (failed(lower) || failed(upper) || failed(step)) {
-      return failure();
-    }
-    if (*step <= 0 || *upper <= *lower ||
-        (*lower < 0 && *upper > std::numeric_limits<int64_t>::max() + *lower)) {
-      return failure();
-    }
-
-    int64_t distance = *upper - *lower;
-    return 1 + (distance - 1) / *step;
-  };
-
-  // Evaluates each nested chain with DFS. active detects a cycle in the
-  // current path, while visited rejects a counter reached through multiple
-  // parent paths. A parent's count multiplies the longest nested child chain.
-  llvm::DenseSet<Operation *> active;
-  llvm::DenseSet<Operation *> visited;
-  std::function<FailureOr<int64_t>(TaskflowCounterOp)> chain_trip_count =
-      [&](TaskflowCounterOp counter) -> FailureOr<int64_t> {
-    Operation *operation = counter.getOperation();
-    if (!active.insert(operation).second || visited.contains(operation)) {
-      error = "task " + task.getTaskName().str() +
-              " has a cyclic or multiply referenced counter chain";
-      return failure();
-    }
-
-    FailureOr<int64_t> count = counter_trip_count(counter);
-    if (failed(count)) {
-      error = "task " + task.getTaskName().str() +
-              " requires constant counter bounds, a positive step, a "
-              "non-empty range, and a trip count within int64";
-      return failure();
-    }
-
-    int64_t longest_child_chain = 1;
-    auto found = children.find(counter.getCounterIndex());
-    if (found != children.end()) {
-      for (TaskflowCounterOp child : found->second) {
-        FailureOr<int64_t> child_count = chain_trip_count(child);
-        if (failed(child_count)) {
-          return failure();
-        }
-        longest_child_chain = std::max(longest_child_chain, *child_count);
-      }
-    }
-    if (*count > std::numeric_limits<int64_t>::max() / longest_child_chain) {
-      error = "task " + task.getTaskName().str() +
-              " requires constant counter bounds, a positive step, a "
-              "non-empty range, and a trip count within int64";
-      return failure();
-    }
-
-    active.erase(operation);
-    visited.insert(operation);
-    return *count * longest_child_chain;
-  };
-
-  // Multiple roots represent independent counter chains, so the task count is
-  // the maximum root-chain count rather than their product.
-  int64_t total = 1;
-  for (TaskflowCounterOp root : roots) {
-    FailureOr<int64_t> root_count = chain_trip_count(root);
-    if (failed(root_count)) {
-      return failure();
-    }
-    total = std::max(total, *root_count);
-  }
-
-  // Every collected counter must be reachable from exactly one root.
-  if (visited.size() != counters.size()) {
-    error = "task " + task.getTaskName().str() +
-            " has a counter disconnected from every root";
-    return failure();
-  }
-  return std::optional<int64_t>{total};
 }
 
 namespace {
