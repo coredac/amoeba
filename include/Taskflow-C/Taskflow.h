@@ -2,12 +2,16 @@
 #define TASKFLOW_C_TASKFLOW_H
 
 #include "mlir-c/IR.h"
+#include "mlir-c/Support.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(Taskflow, taskflow);
+
+// Registers Taskflow and backend passes.
+MLIR_CAPI_EXPORTED void mlirTaskflowRegisterPasses(void);
 
 #ifdef __cplusplus
 }

@@ -5,6 +5,7 @@
 using namespace mlir::python::adaptors;
 
 PYBIND11_MODULE(_TaskflowExtensionPybind11, module) {
+  mlirTaskflowRegisterPasses();
   auto taskflow_module = module.def_submodule("taskflow");
 
   taskflow_module.def(

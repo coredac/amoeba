@@ -1,6 +1,7 @@
 #include "Backend/Neura/NeuraBackendPasses.h"
 
 #include "Conversion/AmoebaConversionPasses.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 
@@ -12,11 +13,9 @@ void mlir::amoeba::neura::registerTaskflowConversionPassPipeline() {
       "Convert affine IR through Taskflow to the Neura backend.",
       [](OpPassManager &pm) {
         pm.addPass(mlir::createConvertAffineToTaskflowPass());
-        pm.addPass(
+        pm.addNestedPass<func::FuncOp>(
             mlir::amoeba::neura::createConstructHyperblockFromTaskPass());
-        pm.addPass(
-            mlir::amoeba::neura::createClassifyTaskAndCounterPass());
-        pm.addPass(
-            mlir::amoeba::neura::createConvertTaskflowToNeuraPass());
+        pm.addPass(mlir::amoeba::neura::createClassifyTaskAndCounterPass());
+        pm.addPass(mlir::amoeba::neura::createConvertTaskflowToNeuraPass());
       });
 }

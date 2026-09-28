@@ -3,4 +3,7 @@ add_mlir_public_c_api_library(MLIRTaskflowCAPI
 
   LINK_LIBS PUBLIC
   MLIRTaskflow
+  MLIRAmoebaBackends
+  MLIRAmoebaConversion
+  MLIRTaskflowTransforms
 )

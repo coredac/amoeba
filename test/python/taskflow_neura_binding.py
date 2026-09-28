@@ -12,6 +12,7 @@ from taskflow_mlir.ir import (
     Module,
     StringAttr,
 )
+from taskflow_mlir.passmanager import PassManager
 
 
 def build_placement(x, y, i32):
@@ -27,6 +28,8 @@ def build_module():
     with Context(), Location.unknown():
         taskflow.register_dialect()
         neura.register_dialect()
+
+        PassManager.parse("builtin.module(taskflow-conversion)")
 
         module = Module.create()
         i32 = IntegerType.get_signless(32)
