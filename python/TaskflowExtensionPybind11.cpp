@@ -9,6 +9,14 @@ PYBIND11_MODULE(_TaskflowExtensionPybind11, module) {
   auto taskflow_module = module.def_submodule("taskflow");
 
   taskflow_module.def(
+      "set_neura_architecture_spec",
+      [](const std::string &architectureSpec) {
+        mlirTaskflowSetNeuraArchitectureSpec(mlirStringRefCreate(
+            architectureSpec.data(), architectureSpec.size()));
+      },
+      py::arg("architecture_spec"));
+
+  taskflow_module.def(
       "register_dialect",
       [](MlirContext context, bool load) {
         MlirDialectHandle handle = mlirGetDialectHandle__taskflow__();

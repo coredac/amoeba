@@ -1,6 +1,8 @@
 # RUN: %python %s | FileCheck %s
 # RUN: %python %s | mlir-amoeba-opt --leverage-predicated-value | FileCheck %s --check-prefix=PREDICATED
 
+from pathlib import Path
+
 from taskflow_mlir.dialects import func, neura, taskflow
 from taskflow_mlir.ir import (
     Context,
@@ -15,6 +17,15 @@ from taskflow_mlir.ir import (
 from taskflow_mlir.passmanager import PassManager
 
 
+ARCHITECTURE_SPEC = (
+    Path(__file__).resolve().parents[1]
+    / "Backend"
+    / "Neura"
+    / "archspec"
+    / "architecture.yaml"
+)
+
+
 def build_placement(x, y, i32):
     return DictAttr.get(
         {
@@ -25,11 +36,12 @@ def build_placement(x, y, i32):
 
 
 def build_module():
+    taskflow.set_neura_architecture_spec(str(ARCHITECTURE_SPEC))
+
     with Context(), Location.unknown():
         taskflow.register_dialect()
         neura.register_dialect()
-
-        PassManager.parse("builtin.module(taskflow-conversion)")
+        pass_manager = PassManager.parse("builtin.module(taskflow-conversion)")
 
         module = Module.create()
         i32 = IntegerType.get_signless(32)
@@ -85,6 +97,7 @@ def build_module():
 
             neura.YieldOp([], [])
 
+        pass_manager.run(module.operation)
         assert module.operation.verify()
         return module
 

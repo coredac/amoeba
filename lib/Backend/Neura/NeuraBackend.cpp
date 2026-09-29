@@ -55,6 +55,11 @@ const std::string &mlir::neura::getLatencySpecFile() {
   return neuraLatencySpec.getValue();
 }
 
+void mlir::amoeba::setNeuraArchitectureSpec(
+    const std::string &architectureSpec) {
+  neuraArchitectureSpec = architectureSpec;
+}
+
 void mlir::amoeba::registerNeuraBackend(DialectRegistry &registry) {
   registry.insert<mlir::neura::NeuraDialect>();
   mlir::neura::registerPasses();

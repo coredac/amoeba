@@ -5,6 +5,12 @@ from ..ir import Context
 from ._taskflow_ops_gen import *
 
 
+def set_neura_architecture_spec(architecture_spec: str) -> None:
+    """Sets the architecture specification used by Neura backend passes."""
+
+    _taskflow_extension.set_neura_architecture_spec(architecture_spec)
+
+
 def register_dialect(
     context: Context | None = None,
     load: bool = True,
