@@ -457,6 +457,82 @@ createHyperblockFromInnermostLoop(OpBuilder &builder, Location loc,
   return hyperblock_op;
 }
 
+// Wraps an uncompiled task body without Affine loops in a hyperblock.
+// Tasks containing an existing kernel or hyperblock are skipped.
+//
+// For example, an SCF-only task changes as follows (schematic IR):
+//   taskflow.task ... {
+//     %value = scf.if %condition -> (i32) { ... } else { ... }
+//     memref.store %value, %output[] : memref<i32>
+//     taskflow.yield done_writes(%output : memref<i32>) values(%value : i32)
+//   }
+//
+// becomes:
+//   taskflow.task ... {
+//     %result = taskflow.hyperblock ... {
+//       %value = scf.if %condition -> (i32) { ... } else { ... }
+//       memref.store %value, %output[] : memref<i32>
+//       taskflow.hyperblock.yield results(%value : i32)
+//     }
+//     taskflow.yield done_writes(%output : memref<i32>) values(%result : i32)
+//   }
+//
+// The task retains its memory dependence states, while computed values pass
+// through hyperblock results. The hyperblock becomes a neura.kernel before
+// SCF-to-CF introduces multiple blocks, preserving the single-block task body.
+static LogicalResult wrapTaskBodyInHyperblock(TaskflowTaskOp task_op) {
+  Block &task_body = task_op.getBody().front();
+  Operation *terminator = task_body.getTerminator();
+
+  SmallVector<Operation *> operations;
+  for (Operation &operation : task_body) {
+    if (&operation == terminator) {
+      continue;
+    }
+    if (isa<neura::KernelOp, TaskflowHyperblockOp>(&operation)) {
+      return success();
+    }
+    operations.push_back(&operation);
+  }
+  if (operations.empty()) {
+    return success();
+  }
+
+  auto task_yield = cast<TaskflowYieldOp>(terminator);
+  SmallVector<Value> results;
+  SmallVector<unsigned> result_operand_indices;
+  for (auto [index, value] : llvm::enumerate(task_yield->getOperands())) {
+    Operation *definition = value.getDefiningOp();
+    if (definition && definition->getBlock() == &task_body) {
+      results.push_back(value);
+      result_operand_indices.push_back(index);
+    }
+  }
+
+  SmallVector<Type> result_types;
+  for (Value result : results) {
+    result_types.push_back(result.getType());
+  }
+
+  OpBuilder builder(operations.front());
+  auto hyperblock = builder.create<TaskflowHyperblockOp>(
+      task_op.getLoc(), result_types, ValueRange{}, ValueRange{});
+  Block *body = &hyperblock.getBody().emplaceBlock();
+  for (Operation *operation : operations) {
+    operation->moveBefore(body, body->end());
+  }
+
+  OpBuilder body_builder = OpBuilder::atBlockEnd(body);
+  body_builder.create<TaskflowHyperblockYieldOp>(
+      task_op.getLoc(), ValueRange{}, results);
+
+  for (auto [result_index, operand_index] :
+       llvm::enumerate(result_operand_indices)) {
+    task_yield->setOperand(operand_index, hyperblock.getResult(result_index));
+  }
+  return success();
+}
+
 //============================================================================
 // Task Transformation.
 //===========================================================================
@@ -473,9 +549,7 @@ static LogicalResult transformTaskWithCounter(TaskflowTaskOp task_op) {
   }
 
   if (top_level_loops.empty()) {
-    // llvm::errs() << "No loops found in task " << task_op.getTaskName() <<
-    // "\n";
-    return success();
+    return wrapTaskBodyInHyperblock(task_op);
   }
 
   assert(top_level_loops.size() == 1 &&
@@ -552,6 +626,9 @@ static LogicalResult transformTaskWithoutCounter(TaskflowTaskOp task_op) {
   });
 
   llvm::errs() << "  Found " << innermost_loops.size() << " innermost loops\n";
+  if (innermost_loops.empty()) {
+    return wrapTaskBodyInHyperblock(task_op);
+  }
 
   OpBuilder builder(task_op.getContext());
 
